@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Color-managed review browser — declare the grade gamma, see the intended image.",
   "main": "dist/main/main.js",
+  "updateRepo": "CanadianWiteout/kootenay-browser",
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run assets",
     "assets": "mkdir -p dist/ui dist/probe && cp src/ui/*.html src/ui/*.css dist/ui/ && cp src/probe/*.html dist/probe/ && cp -R src/probe/assets dist/probe/ && cp -R src/probe/corrections dist/probe/",
@@ -12,7 +13,8 @@
     "test": "tsc -p tsconfig.json && node --test dist/test/",
     "package": "npm run build && electron-packager . \"Kootenay Browser\" --platform=darwin --arch=arm64 --out=out --overwrite --app-bundle-id=com.kootenay.browser --icon=build/icon --ignore=\"^/(src|scripts|out|\\.git|node_modules/\\.cache|test)\"",
     "install-app": "npm run package && rm -rf \"/Applications/Kootenay Browser.app\" && cp -R \"out/Kootenay Browser-darwin-arm64/Kootenay Browser.app\" /Applications/ && echo \"Installed to /Applications/Kootenay Browser.app\"",
-    "dmg": "bash scripts/make_dmg.sh"
+    "dmg": "bash scripts/make_dmg.sh",
+    "publish": "bash scripts/publish_release.sh"
   },
   "license": "MIT",
   "devDependencies": {

@@ -27,6 +27,7 @@ export interface MenuActions {
   selectTab(index: number): void;
   openSettings(): void;
   openProbe(): void;
+  checkForUpdates(): void;
   print(): void;
   clearBrowsingData(): void;
   toggleDevTools(): void;
@@ -50,6 +51,7 @@ export function installMenu(a: MenuActions): void {
       label: app.name,
       submenu: [
         { role: 'about' },
+        { label: 'Check for Updates…', click: a.checkForUpdates },
         { type: 'separator' },
         { label: 'Color Settings…', accelerator: 'Cmd+,', click: a.openSettings },
         { type: 'separator' },

@@ -57,6 +57,7 @@ import {
   clearHistory,
 } from './history';
 import { installMenu } from './menu';
+import { checkForUpdates, startAutoUpdate, fetchLatest } from './updater';
 import { lightProfileFromGamma, lightProfileFromPoints } from '../color/presets';
 import { currentDisplay, allDisplays, DisplayInfo } from './displays';
 import { runMeasurement } from './calibration';
@@ -1328,6 +1329,7 @@ function installAppMenu(): void {
     selectTab: selectTabByIndex,
     openSettings: openSettingsWindow,
     openProbe: () => void createTab(probeUrl()),
+    checkForUpdates: () => void checkForUpdates(false),
     print: () => activeTab()?.view.webContents.print(),
     clearBrowsingData: () => {
       openSettingsWindow();
@@ -1357,6 +1359,7 @@ app.whenReady().then(async () => {
   setupDownloads();
   installAppMenu();
   createWindow();
+  startAutoUpdate();
 
   if (process.argv.includes('--measure')) {
     // Headless-ish self-test: measure the pipeline, bake calibration, exit.
@@ -1581,6 +1584,22 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.error('KC_WIZ FAILED', err);
       process.exitCode = 1;
+    }
+    app.quit();
+  } else if (process.argv.includes('--update-check')) {
+    try {
+      const info = await fetchLatest();
+      console.log(
+        'KC_UPDATE ' +
+          JSON.stringify({
+            current: app.getVersion(),
+            latest: info
+              ? { version: info.version, hasZip: !!info.zipUrl }
+              : null,
+          }),
+      );
+    } catch (err) {
+      console.log('KC_UPDATE ' + JSON.stringify({ error: String(err) }));
     }
     app.quit();
   } else if (process.argv.includes('--panel-check')) {
