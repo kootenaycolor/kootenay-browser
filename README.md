@@ -53,6 +53,29 @@ The **only** feature needing an external dependency is the optional i1 hardware
 probe, which uses ArgyllCMS (`brew install argyll`). Everything else is
 self-contained.
 
+## Distributing updates
+
+The app self-updates from GitHub Releases (no Apple Developer ID needed — it
+downloads the new build, strips quarantine, swaps itself in /Applications, and
+relaunches).
+
+**One-time setup:**
+1. Create the GitHub repo and set `"updateRepo": "owner/name"` in package.json.
+2. `git remote add origin …` and push; install + auth the GitHub CLI (`gh auth login`).
+
+**Every release:**
+```
+npm run publish -- 0.2.0 "What changed in this version"
+```
+This bumps the version to the tag, builds the universal app + DMG, zips the
+.app, and creates the GitHub release with both assets. Installed copies pick it
+up within a day, or immediately via **Kootenay Browser → Check for Updates…**.
+New users download the DMG asset from the release.
+
+The version bump and tag must match (the script enforces this) or the updater
+would re-offer the same build. First-time users need the **DMG that already
+contains the updater** — rebuild it once with `npm run dmg` after this is set up.
+
 ## Hardware probe (i1 Display Pro Plus)
 
 Color Settings → current display → **Measure with hardware probe…** Requires
