@@ -6,7 +6,7 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run assets",
-    "assets": "mkdir -p dist/ui dist/probe && cp src/ui/*.html src/ui/*.css dist/ui/ && cp src/probe/*.html dist/probe/ && cp -R src/probe/assets dist/probe/",
+    "assets": "mkdir -p dist/ui dist/probe && cp src/ui/*.html src/ui/*.css dist/ui/ && cp src/probe/*.html dist/probe/ && cp -R src/probe/assets dist/probe/ && cp -R src/probe/corrections dist/probe/",
     "start": "npm run build && electron .",
     "measure": "npm run build && electron . --measure",
     "test": "tsc -p tsconfig.json && node --test dist/test/",

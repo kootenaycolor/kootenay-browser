@@ -1,0 +1,70 @@
+{
+  "name": "i1_display_pro_plus_PA32UCDM",
+  "display_name": "i1 Display Pro Plus \u2192 PA32UCDM (2026-05-25)",
+  "reference_meter": "Colorimetry Research CR-300",
+  "probe": "i1 Display Pro Plus",
+  "display": "ASUS PA32UCDM (T7LMSV009538)",
+  "calibration_date": "2026-05-25",
+  "points": [
+    {
+      "signal_pct": 10,
+      "Y_factor": 0.839939,
+      "dx": 0.004523,
+      "dy": 0.000611
+    },
+    {
+      "signal_pct": 20,
+      "Y_factor": 0.919195,
+      "dx": 0.002937,
+      "dy": -0.001255
+    },
+    {
+      "signal_pct": 30,
+      "Y_factor": 0.918617,
+      "dx": 0.003828,
+      "dy": -0.001715
+    },
+    {
+      "signal_pct": 40,
+      "Y_factor": 0.97496,
+      "dx": 0.003213,
+      "dy": -0.001822
+    },
+    {
+      "signal_pct": 50,
+      "Y_factor": 1.033885,
+      "dx": 0.003308,
+      "dy": -0.002915
+    },
+    {
+      "signal_pct": 60,
+      "Y_factor": 0.989834,
+      "dx": 0.003063,
+      "dy": -0.002149
+    },
+    {
+      "signal_pct": 70,
+      "Y_factor": 0.980896,
+      "dx": 0.003303,
+      "dy": -0.002131
+    },
+    {
+      "signal_pct": 80,
+      "Y_factor": 1.001679,
+      "dx": 0.002521,
+      "dy": -0.002595
+    },
+    {
+      "signal_pct": 90,
+      "Y_factor": 1.003817,
+      "dx": 0.003084,
+      "dy": -0.00213
+    },
+    {
+      "signal_pct": 100,
+      "Y_factor": 1.00189,
+      "dx": 0.00238,
+      "dy": -0.002882
+    }
+  ]
+}

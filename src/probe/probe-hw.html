@@ -4,39 +4,113 @@
 <meta charset="utf-8">
 <title>Probe Measurement</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
-  video { width: 100vw; height: 100vh; object-fit: contain; display: block; }
-  /* HUD hugs the top edge, far outside the 20% center patch field. */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none;
+    font: 13px -apple-system, 'SF Pro Text', sans-serif; color: #c9c6bf; }
+  video { position: absolute; inset: 0; width: 100vw; height: 100vh;
+    object-fit: contain; display: block; }
   #hud {
     position: fixed; top: 8px; left: 0; right: 0; text-align: center;
-    font: 13px -apple-system, sans-serif; color: #777;
-    pointer-events: none; user-select: none;
+    font-size: 12px; color: #666; pointer-events: none; user-select: none;
   }
   #hud:empty { display: none; }
+
+  /* Info panel hugs the right edge, clear of the centered 20% patch field.
+     Kept dark and low-contrast so it doesn't contaminate the measurement. */
+  #panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 300px;
+    background: rgba(8, 8, 8, 0.92); border-left: 1px solid #1c1c1c;
+    padding: 22px 20px; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  #panel h1 { font-size: 13px; font-weight: 600; margin: 0 0 2px; color: #e8e6e0; }
+  #panel .sub { font-size: 11px; color: #6f6c66; margin-bottom: 16px; }
+  #phase { font-size: 12px; color: #d97757; margin-bottom: 4px; min-height: 16px; }
+  #bar { height: 3px; background: #1c1c1c; border-radius: 2px; overflow: hidden; margin-bottom: 14px; }
+  #bar > div { height: 100%; width: 0; background: #d97757; transition: width 0.2s; }
+  #log { flex: 1; overflow: hidden; font: 11px 'SF Mono', ui-monospace, Menlo, monospace;
+    color: #8a8780; display: flex; flex-direction: column; gap: 3px; }
+  #log .r { white-space: nowrap; }
+  #log .r b { color: #c9c6bf; font-weight: 500; }
+  #outcome { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1c1c1c; font-size: 12px; }
+  #outcome.done b { color: #7ec27e; }
+  #outcome.warn b { color: #d9a441; }
+  #outcome.err b { color: #d9776a; }
+  #closing { font-size: 11px; color: #55524d; margin-top: 6px; }
+  .kbd { font-size: 10.5px; color: #55524d; margin-top: auto; padding-top: 12px; }
 </style>
 </head>
 <body>
   <video id="v" src="assets/patch-steps-709.mp4" muted playsinline preload="auto"></video>
   <div id="hud"></div>
+  <div id="panel">
+    <h1>Hardware probe</h1>
+    <div class="sub" id="p-display"></div>
+    <div id="phase">Initializing…</div>
+    <div id="bar"><div></div></div>
+    <div id="log"></div>
+    <div id="outcome"></div>
+    <div id="closing"></div>
+    <div class="kbd">Esc to cancel</div>
+  </div>
   <script>
-    // Driven from the main process via executeJavaScript:
-    //   window.kcShowSegment(n) → resolves once the seeked frame is presented
-    //   window.kcHud(text)
     const v = document.getElementById('v');
     const hud = document.getElementById('hud');
+    const phaseEl = document.getElementById('phase');
+    const barEl = document.querySelector('#bar > div');
+    const logEl = document.getElementById('log');
+    const outcomeEl = document.getElementById('outcome');
+    const closingEl = document.getElementById('closing');
+    const dispEl = document.getElementById('p-display');
+
     window.kcHud = (text) => { hud.textContent = text || ''; };
     window.kcShowSegment = (segment) =>
       new Promise((resolve) => {
         const target = segment * 2 + 1;
         v.pause();
         const done = () => requestAnimationFrame(() => requestAnimationFrame(resolve));
-        if (Math.abs(v.currentTime - target) < 0.05 && v.readyState >= 2) {
-          done();
-          return;
-        }
+        if (Math.abs(v.currentTime - target) < 0.05 && v.readyState >= 2) { done(); return; }
         v.addEventListener('seeked', done, { once: true });
         v.currentTime = target;
       });
+
+    const PHASE_LABEL = { measure: 'Measuring', drift: 'Drift check', verify: 'Verifying' };
+    function addLog(text) {
+      const r = document.createElement('div');
+      r.className = 'r';
+      r.innerHTML = text;
+      logEl.appendChild(r);
+      while (logEl.childElementCount > 14) logEl.removeChild(logEl.firstChild);
+    }
+
+    window.kcPanel = (m) => {
+      if (m.kind === 'begin') {
+        dispEl.textContent =
+          m.display + (m.correction ? ' · correction on' : ' · raw');
+      } else if (m.kind === 'progress') {
+        phaseEl.textContent = `${PHASE_LABEL[m.phase] || ''} — ${m.label}`;
+        if (m.total) barEl.style.width = `${Math.round((m.index / m.total) * 100)}%`;
+        if (m.done) {
+          const val = m.Y !== undefined ? ` — <b>${m.Y.toFixed(2)}</b> cd/m²` : '';
+          addLog(`✓ ${m.label}${val}`);
+        }
+      } else if (m.kind === 'done') {
+        barEl.style.width = '100%';
+        phaseEl.textContent = 'Complete';
+        outcomeEl.className = m.driftValid ? 'done' : 'warn';
+        outcomeEl.innerHTML =
+          `Fitted gamma <b>${m.fittedGamma}</b><br>` +
+          `Verify RMS <b>${m.rms}%</b> · drift ${m.driftPct}%` +
+          (m.driftValid ? '' : ' ⚠');
+        closingEl.textContent = 'Profile saved. Returning…';
+      } else if (m.kind === 'cancelled') {
+        phaseEl.textContent = 'Cancelled';
+        closingEl.textContent = 'Returning…';
+      } else if (m.kind === 'error') {
+        outcomeEl.className = 'err';
+        outcomeEl.innerHTML = `<b>Failed:</b> ${m.message || 'error'}`;
+        closingEl.textContent = 'Returning…';
+      }
+    };
   </script>
 </body>
 </html>

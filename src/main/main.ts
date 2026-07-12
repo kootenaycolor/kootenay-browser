@@ -935,9 +935,16 @@ function wireIpc(): void {
   );
 
   ipcMain.handle('kc:probe-detect', () => probeDetect());
+  ipcMain.handle('kc:probe-corrections', () => listBuiltinCorrections());
   ipcMain.handle(
     'kc:probe-run',
-    async (_e, opts: { samples?: number; correctionPath?: string | null }) => {
+    async (
+      _e,
+      opts: {
+        samples?: number;
+        correction?: { builtin?: string; path?: string } | null;
+      },
+    ) => {
       try {
         return await runHardwareProbe(opts ?? {});
       } catch (err) {
@@ -949,7 +956,6 @@ function wireIpc(): void {
     probeCancelled = true;
   });
   ipcMain.handle('kc:probe-pick-correction', async () => {
-    const { dialog } = require('electron') as typeof import('electron');
     const res = await dialog.showOpenDialog(settingsWin ?? win!, {
       title: 'Choose probe correction profile',
       filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -989,6 +995,39 @@ function getProbe(): Spotread | null {
   if (!bin) return null;
   if (!probeInstance) probeInstance = new Spotread(bin);
   return probeInstance;
+}
+
+function correctionsDir(): string {
+  return path.join(__dirname, '..', 'probe', 'corrections');
+}
+
+/** Built-in probe-correction profiles bundled with the app. */
+function listBuiltinCorrections(): { id: string; label: string }[] {
+  try {
+    return fs
+      .readdirSync(correctionsDir())
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        const j = JSON.parse(fs.readFileSync(path.join(correctionsDir(), f), 'utf8'));
+        return { id: f, label: j.display_name || j.name || f };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function resolveCorrection(arg: {
+  builtin?: string;
+  path?: string;
+}): CorrectionPoint[] | null {
+  let raw: string | null = null;
+  if (arg.builtin) {
+    const f = path.join(correctionsDir(), path.basename(arg.builtin));
+    if (fs.existsSync(f)) raw = fs.readFileSync(f, 'utf8');
+  } else if (arg.path && fs.existsSync(arg.path)) {
+    raw = fs.readFileSync(arg.path, 'utf8');
+  }
+  return raw ? parseCorrectionProfile(JSON.parse(raw)) : null;
 }
 
 async function probeDetect(): Promise<ProbeStatus> {
@@ -1033,44 +1072,48 @@ function openProbeWindow(display: DisplayInfo): Promise<BrowserWindow> {
 
 async function runHardwareProbe(opts: {
   samples?: number;
-  correctionPath?: string | null;
+  correction?: { builtin?: string; path?: string } | null;
   settleMs?: number;
   progress?: (p: unknown) => void;
+  holdMs?: number;
 }): Promise<unknown> {
   const display = curDisplay();
   if (!display) throw new Error('no display');
   const probe = getProbe();
   if (!probe) throw new Error('ArgyllCMS not found — brew install argyll');
 
-  let correction: CorrectionPoint[] | null = null;
-  if (opts.correctionPath) {
-    const fs = require('fs') as typeof import('fs');
-    correction = parseCorrectionProfile(
-      JSON.parse(fs.readFileSync(opts.correctionPath, 'utf8')),
-    );
-  }
+  const correction = opts.correction ? resolveCorrection(opts.correction) : null;
 
   probeCancelled = false;
   probeWin = await openProbeWindow(display);
   const w = probeWin;
+  const panel = (payload: unknown) => {
+    if (w && !w.isDestroyed()) {
+      w.webContents
+        .executeJavaScript(`window.kcPanel && window.kcPanel(${JSON.stringify(payload)})`)
+        .catch(() => {});
+    }
+  };
+  panel({ kind: 'begin', display: display.label, correction: !!correction });
+
   const host: ProbeHost = {
     showSegment: async (segment) => {
       await w.webContents.executeJavaScript(`window.kcShowSegment(${segment})`);
     },
     hud: async (text) => {
-      await w.webContents.executeJavaScript(
-        `window.kcHud(${JSON.stringify(text)})`,
-      );
+      await w.webContents.executeJavaScript(`window.kcHud(${JSON.stringify(text)})`);
     },
     sendLut: (values) => w.webContents.send('kc:lut', values),
     onProgress: (p) => {
       opts.progress?.(p);
       settingsWin?.webContents.send('kc:probe-progress', p);
+      panel({ kind: 'progress', ...(p as object) });
     },
     isCancelled: () => probeCancelled,
     display: { id: display.id, label: display.label },
   };
 
+  const holdMs = opts.holdMs ?? 3200;
   try {
     const result = await runProbeMeasurement(host, probe, {
       samplesPerPatch: opts.samples ?? 3,
@@ -1080,6 +1123,15 @@ async function runHardwareProbe(opts: {
     addProfileForDisplay(display.id, result.profile);
     pushAllLuts();
     broadcastState();
+    // Show the outcome on the probe screen, then drop out of fullscreen.
+    panel({
+      kind: 'done',
+      fittedGamma: result.fittedGamma,
+      driftPct: result.driftPct,
+      driftValid: result.driftValid,
+      rms: result.verify.rmsPctError,
+    });
+    await new Promise((r) => setTimeout(r, holdMs));
     return {
       ok: true,
       fittedGamma: result.fittedGamma,
@@ -1089,12 +1141,26 @@ async function runHardwareProbe(opts: {
       readings: result.readings,
       profileLabel: result.profile.label,
     };
+  } catch (err) {
+    panel({
+      kind: probeCancelled ? 'cancelled' : 'error',
+      message: String((err as Error).message ?? err),
+    });
+    await new Promise((r) => setTimeout(r, probeCancelled ? 400 : 1800));
+    throw err;
   } finally {
     probe.dispose();
     probeInstance = null;
-    if (probeWin && !probeWin.isDestroyed()) probeWin.close();
-    probeWin = null;
+    closeProbeWindow();
   }
+}
+
+function closeProbeWindow(): void {
+  if (probeWin && !probeWin.isDestroyed()) {
+    if (probeWin.isFullScreen()) probeWin.setFullScreen(false);
+    probeWin.close();
+  }
+  probeWin = null;
 }
 
 function openSettingsWindow(): void {
@@ -1452,9 +1518,14 @@ app.whenReady().then(async () => {
       const status = await probeDetect();
       console.log('KC_PROBE_DETECT ' + JSON.stringify(status));
       if (status.state !== 'ready') throw new Error(status.state);
+      const useCorr = process.argv.includes('--with-correction');
       const result = await runHardwareProbe({
         samples: 1,
         settleMs: 50,
+        holdMs: 200,
+        correction: useCorr
+          ? { builtin: 'i1dpp-cr300-pa32ucdm.json' }
+          : null,
         progress: (p) => console.log('KC_PROBE_PROGRESS ' + JSON.stringify(p)),
       });
       console.log('KC_PROBE_RESULT ' + JSON.stringify(result, null, 2));
@@ -1511,6 +1582,28 @@ app.whenReady().then(async () => {
       console.error('KC_WIZ FAILED', err);
       process.exitCode = 1;
     }
+    app.quit();
+  } else if (process.argv.includes('--panel-check')) {
+    const outDir =
+      process.argv.find((a) => a.startsWith('--shots='))?.slice(8) ?? '.';
+    const fs2 = require('fs') as typeof import('fs');
+    const display = curDisplay()!;
+    win!.setPosition(60, 60);
+    const w = await openProbeWindow(display);
+    await w.webContents.executeJavaScript('window.kcShowSegment(6)');
+    const send = (m: unknown) =>
+      w.webContents.executeJavaScript(`window.kcPanel(${JSON.stringify(m)})`);
+    await send({ kind: 'begin', display: display.label, correction: true });
+    await send({ phase: 'measure', label: 'White ref (100%)', index: 0, total: 12, kind: 'progress' });
+    await send({ phase: 'measure', label: 'White ref (100%)', index: 0, total: 12, Y: 118.4, done: true, kind: 'progress' });
+    await send({ phase: 'measure', label: '60%', index: 4, total: 12, Y: 37.9, done: true, kind: 'progress' });
+    await send({ phase: 'verify', label: 'Verify 60%', index: 1, total: 3, Y: 29.5, done: true, kind: 'progress' });
+    await send({ kind: 'done', fittedGamma: 2.28, driftPct: 0.3, driftValid: true, rms: 1.2 });
+    await new Promise((r) => setTimeout(r, 400));
+    const shot = await w.webContents.capturePage();
+    fs2.writeFileSync(outDir + '/panel-check.png', shot.toPNG());
+    console.log('KC_PANEL wrote panel-check.png');
+    w.close();
     app.quit();
   } else if (process.argv.includes('--newtab-check')) {
     const report: Record<string, unknown> = {};

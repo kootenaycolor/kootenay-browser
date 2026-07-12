@@ -149,17 +149,44 @@ function renderProbeWizard(card: HTMLElement): HTMLElement {
 
   const corrRow = el('div', '', 'row');
   corrRow.style.marginTop = '8px';
-  const corrLabel = text('span', 'hint', 'Probe correction: none');
-  let correctionPath: string | null = null;
-  const corrBtn = button('Choose…');
-  corrBtn.onclick = async () => {
-    const p = (await kc.invoke('kc:probe-pick-correction')) as string | null;
-    if (p) {
-      correctionPath = p;
-      corrLabel.textContent = 'Probe correction: ' + p.split('/').pop();
+  const corrLabel = text('span', 'hint', 'Probe correction');
+  let correctionSpec: { builtin?: string; path?: string } | null = null;
+  const corrSel = document.createElement('select');
+  corrSel.style.flex = '1';
+  const optNone = new Option('None (raw probe)', 'none');
+  corrSel.add(optNone);
+  corrSel.add(new Option('Choose file…', 'file'));
+  // Fill built-ins (e.g. i1 DPP → CR-300) from the app bundle.
+  kc.invoke('kc:probe-corrections').then((raw) => {
+    const list = raw as { id: string; label: string }[];
+    list.forEach((c, i) => {
+      corrSel.add(new Option(c.label, 'builtin:' + c.id), 1 + i);
+    });
+    if (list.length) {
+      // default to the first built-in correction
+      corrSel.value = 'builtin:' + list[0].id;
+      correctionSpec = { builtin: list[0].id };
+    }
+  });
+  corrSel.onchange = async () => {
+    const v = corrSel.value;
+    if (v === 'none') correctionSpec = null;
+    else if (v.startsWith('builtin:')) correctionSpec = { builtin: v.slice(8) };
+    else if (v === 'file') {
+      const p = (await kc.invoke('kc:probe-pick-correction')) as string | null;
+      if (p) {
+        const opt = new Option(p.split('/').pop() ?? p, 'path');
+        corrSel.add(opt);
+        corrSel.value = 'path';
+        correctionSpec = { path: p };
+      } else {
+        corrSel.value = correctionSpec?.builtin
+          ? 'builtin:' + correctionSpec.builtin
+          : 'none';
+      }
     }
   };
-  corrRow.append(corrLabel, corrBtn);
+  corrRow.append(corrLabel, corrSel);
 
   const startRow = el('div', '', 'row');
   startRow.style.marginTop = '10px';
@@ -187,7 +214,7 @@ function renderProbeWizard(card: HTMLElement): HTMLElement {
     probeProgressEl = progress;
     const res = (await kc.invoke('kc:probe-run', {
       samples: parseInt(avgInput.value, 10) || 3,
-      correctionPath,
+      correction: correctionSpec,
     })) as KcProbeResult;
     probeProgressEl = null;
     start.disabled = false;
