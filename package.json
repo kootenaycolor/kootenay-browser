@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Color-managed review browser — declare the grade gamma, see the intended image.",
   "main": "dist/main/main.js",
-  "updateRepo": "CanadianWiteout/kootenay-browser",
+  "updateRepo": "kootenaycolor/kootenay-browser",
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run assets",
     "assets": "mkdir -p dist/ui dist/probe && cp src/ui/*.html src/ui/*.css dist/ui/ && cp src/probe/*.html dist/probe/ && cp -R src/probe/assets dist/probe/ && cp -R src/probe/corrections dist/probe/",
