@@ -8,6 +8,7 @@ import { app, Menu, MenuItemConstructorOptions } from 'electron';
 export interface MenuActions {
   newTab(): void;
   closeTab(): void;
+  reopenTab(): void;
   reload(): void;
   hardReload(): void;
   back(): void;
@@ -67,6 +68,11 @@ export function installMenu(a: MenuActions): void {
       submenu: [
         { label: 'New Tab', accelerator: 'Cmd+T', click: a.newTab },
         { label: 'Close Tab', accelerator: 'Cmd+W', click: a.closeTab },
+        {
+          label: 'Reopen Closed Tab',
+          accelerator: 'Cmd+Shift+T',
+          click: a.reopenTab,
+        },
         { type: 'separator' },
         { label: 'Open Location…', accelerator: 'Cmd+L', click: a.focusUrlBar },
         { type: 'separator' },

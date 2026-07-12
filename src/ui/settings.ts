@@ -61,12 +61,10 @@ function renderDisplay(d: KcDisplayState, s: KcSettingsState): HTMLElement {
       wizard.classList.toggle('open');
       if (wizard.classList.contains('open')) probeDetectInto(wizard);
     };
-    const measure = button('Quick measure (screen)');
-    measure.onclick = () => runMeasure(measure, card);
     const importBtn = button('Import physical measurement');
     const importRow = renderImport(card);
     importBtn.onclick = () => importRow.classList.toggle('open');
-    actions.append(hw, measure, importBtn);
+    actions.append(hw, importBtn);
     card.append(actions, wizard, importRow);
   } else {
     actions.append(
@@ -251,29 +249,6 @@ function renderImport(card: HTMLElement): HTMLElement {
   };
   row.append(label, input, go, result);
   return row;
-}
-
-async function runMeasure(btn: HTMLButtonElement, card: HTMLElement): Promise<void> {
-  btn.disabled = true;
-  const prev = btn.textContent;
-  btn.textContent = 'Measuring…';
-  const result = el('div', '', 'result');
-  card.append(result);
-  result.textContent = 'A probe tab opens briefly…';
-  try {
-    const s = (await kc.invoke('kc:calibrate')) as {
-      effectiveInterpGamma: number;
-      rmsUncorrected: number;
-      rmsCorrected: number;
-    };
-    result.textContent =
-      `Interpretation gamma ${s.effectiveInterpGamma} · ` +
-      `RMS ${s.rmsUncorrected} → ${s.rmsCorrected}`;
-  } catch (err) {
-    result.textContent = 'Measurement failed: ' + String(err);
-  }
-  btn.disabled = false;
-  btn.textContent = prev;
 }
 
 // ── tiny DOM helpers ────────────────────────────────────────────────────────

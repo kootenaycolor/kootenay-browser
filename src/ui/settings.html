@@ -98,6 +98,13 @@
 
     <section>
       <h2>Measured displays</h2>
+      <p class="hint" style="margin:-4px 0 12px">
+        <b>Simple</b> mode needs nothing here — it targets Gamma 2.2 on any
+        display. <b>Measured</b> mode cancels a specific display's gamma exactly,
+        from a hardware-probe reading or imported physical-light data. (A
+        screen-only estimate was removed: it reads the framebuffer, not the
+        panel's actual light, so it can look right while being wrong.)
+      </p>
       <div id="displays"></div>
     </section>
   </main>

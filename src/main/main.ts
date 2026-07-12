@@ -326,7 +326,7 @@ function showTab(id: number): void {
 
 function createTab(
   url: string,
-  opts: { method?: Method; source?: TransferId } = {},
+  opts: { method?: Method; source?: TransferId; background?: boolean } = {},
 ): Tab {
   const view = new WebContentsView({
     webPreferences: {
@@ -346,13 +346,13 @@ function createTab(
   win!.contentView.addChildView(view);
 
   const wc = view.webContents;
-  wc.setWindowOpenHandler(({ url: target }) => {
+  wc.setWindowOpenHandler(({ url: target, disposition }) => {
     if (!/^https?:|^file:/.test(target)) {
       shell.openExternal(target); // mailto:, ftp:, custom schemes
       return { action: 'deny' };
     }
-    const t = createTab(target);
-    showTab(t.id);
+    // cmd-click / middle-click open in the background; _blank & new-window focus.
+    createTab(target, { background: disposition === 'background-tab' });
     return { action: 'deny' };
   });
   wc.on('page-title-updated', (_e, title) => {
@@ -420,7 +420,8 @@ function createTab(
   attachContextMenu(tab);
 
   wc.loadURL(url);
-  showTab(tab.id);
+  if (!opts.background) showTab(tab.id);
+  else broadcastState();
   return tab;
 }
 
@@ -434,7 +435,7 @@ function attachContextMenu(tab: Tab): void {
       items.push(
         {
           label: 'Open Link in New Tab',
-          click: () => void createTab(params.linkURL),
+          click: () => void createTab(params.linkURL, { background: true }),
         },
         {
           label: 'Copy Link',
@@ -574,10 +575,17 @@ function cycleTab(delta: number): void {
   showTab(tabs[next].id);
 }
 
+const closedTabs: { url: string; index: number }[] = [];
+
 function closeTab(id: number): void {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx === -1) return;
   const [tab] = tabs.splice(idx, 1);
+  const url = tab.view.webContents.getURL();
+  if (/^https?:/.test(url)) {
+    closedTabs.push({ url, index: idx });
+    if (closedTabs.length > 25) closedTabs.shift();
+  }
   win?.contentView.removeChildView(tab.view);
   tab.view.webContents.close();
   if (tabs.length === 0) {
@@ -587,6 +595,19 @@ function closeTab(id: number): void {
   } else {
     broadcastState();
   }
+  scheduleSessionSave();
+}
+
+function reopenClosedTab(): void {
+  const last = closedTabs.pop();
+  if (last) createTab(last.url);
+}
+
+function stopOrReload(): void {
+  const wc = activeTab()?.view.webContents;
+  if (!wc) return;
+  if (wc.isLoadingMainFrame()) wc.stop();
+  else wc.reload();
 }
 
 function normalizeInput(input: string): string {
@@ -607,7 +628,7 @@ function wireIpc(): void {
   ipcMain.on('kc:forward', () =>
     activeTab()?.view.webContents.navigationHistory.goForward(),
   );
-  ipcMain.on('kc:reload', () => activeTab()?.view.webContents.reload());
+  ipcMain.on('kc:reload', () => stopOrReload());
   ipcMain.on('kc:new-tab', () => void createTab(homePage()));
   ipcMain.on('kc:close-tab', (_e, id: number) => closeTab(id));
   ipcMain.on('kc:select-tab', (_e, id: number) => showTab(id));
@@ -713,21 +734,6 @@ function wireIpc(): void {
     setSimpleTarget(target);
     pushAllLuts();
     broadcastState();
-  });
-
-  ipcMain.handle('kc:calibrate', async () => {
-    const display = curDisplay() ?? undefined;
-    const result = await runMeasurement({
-      createTab: (url) => createTab(url, { method: 'off' }),
-      closeTab,
-      probeUrl: probeUrl(),
-      sendLut: (tab, values) => tab.view.webContents.send('kc:lut', values),
-      display,
-    });
-    if (display) addProfileForDisplay(display.id, result.profile);
-    pushAllLuts();
-    broadcastState();
-    return result.summary;
   });
 
   // Physical-light import: quick (effective gamma) or full (patch points).
@@ -1014,6 +1020,7 @@ function installAppMenu(): void {
   installMenu({
     newTab: () => void createTab(homePage()),
     closeTab: () => activeTabId !== -1 && closeTab(activeTabId),
+    reopenTab: reopenClosedTab,
     reload: () => activeTab()?.view.webContents.reload(),
     hardReload: () => activeTab()?.view.webContents.reloadIgnoringCache(),
     back: () => activeTab()?.view.webContents.navigationHistory.goBack(),

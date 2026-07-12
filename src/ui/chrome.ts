@@ -70,6 +70,9 @@ function render(): void {
     }
     backBtn.disabled = !tab.canGoBack;
     fwdBtn.disabled = !tab.canGoForward;
+    const reload = $('reload');
+    reload.textContent = tab.loading ? '✕' : '⟳';
+    reload.title = tab.loading ? 'Stop' : 'Reload (⌘R)';
 
     const source = state.presets.find((p) => p.id === tab.source);
     if (tab.method === 'off') {
