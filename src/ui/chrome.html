@@ -108,51 +108,6 @@
   #pipebtn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
   #pipebtn .swatch { font-size: 13px; }
 
-  /* ── popover ───────────────────────────────────────────── */
-  #popover {
-    position: fixed;
-    top: 88px; right: 12px;
-    width: 300px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    box-shadow: var(--shadow);
-    padding: 16px;
-    z-index: 10;
-    display: none;
-    opacity: 0;
-    transition: opacity 120ms ease;
-  }
-  #popover.open { display: block; opacity: 1; }
-  #popover h3 {
-    margin: 0 0 2px; font-size: 13px; font-weight: 600;
-  }
-  #popover .sub {
-    margin: 0 0 14px; font-size: 11.5px; color: var(--text-secondary);
-    line-height: 1.45;
-  }
-  .field { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .field label { font-size: 12.5px; color: var(--text-secondary); }
-  .field select {
-    -webkit-appearance: none;
-    font-family: var(--font); font-size: 12.5px;
-    color: var(--text);
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 5px 24px 5px 10px;
-    outline: none; cursor: pointer;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0l4 5 4-5z' fill='%23999'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-  }
-  #pipeline-note {
-    margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid var(--border);
-    font-size: 11px; color: var(--text-secondary); line-height: 1.5;
-  }
-  #pipeline-note .cal { color: var(--accent); cursor: pointer; }
-  #calresult { margin-top: 8px; font-family: var(--font-mono); font-size: 10.5px; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -169,28 +124,6 @@
       <button id="pipebtn" title="Color pipeline">
         <span class="swatch">◇</span><span id="pipelabel">Color: Off</span>
       </button>
-    </div>
-  </div>
-
-  <div id="popover">
-    <h3>Color Pipeline</h3>
-    <p class="sub">Declare how this file was graded. The browser offsets what
-    the platform and macOS do to it, so you see the intended image.</p>
-    <div class="field">
-      <label>Management</label>
-      <select id="mode">
-        <option value="off">Off</option>
-        <option value="custom">Custom</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Source Gamma</label>
-      <select id="gamma"></select>
-    </div>
-    <div id="pipeline-note">
-      Pipeline: <span id="pipeprofile"></span><br>
-      <span class="cal" id="calibrate">Calibrate this display…</span>
-      <div id="calresult"></div>
     </div>
   </div>
 

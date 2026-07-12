@@ -1,26 +1,6 @@
-// Chrome renderer. No imports/exports — compiled as a plain script.
-
-interface KcTabState {
-  id: number;
-  title: string;
-  url: string;
-  gamma: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-}
-interface KcState {
-  tabs: KcTabState[];
-  activeId: number;
-  presets: { id: string; label: string }[];
-  pipeline: { label: string; measured: boolean };
-}
-interface KcBridge {
-  send(channel: string, ...args: unknown[]): void;
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
-  onState(cb: (state: KcState) => void): void;
-}
-declare const kc: KcBridge;
-
+// Chrome renderer. Types are shared via kc.d.ts. Wrapped in an IIFE so its
+// locals don't collide with popover.ts in the shared compilation scope.
+(() => {
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
@@ -30,14 +10,8 @@ const backBtn = $<HTMLButtonElement>('back');
 const fwdBtn = $<HTMLButtonElement>('forward');
 const pipebtn = $('pipebtn');
 const pipelabel = $('pipelabel');
-const popover = $('popover');
-const modeSel = $<HTMLSelectElement>('mode');
-const gammaSel = $<HTMLSelectElement>('gamma');
-const pipeprofile = $('pipeprofile');
-const calresult = $('calresult');
 
 let state: KcState | null = null;
-let lastGamma = 'gamma24'; // remembered so Mode: Custom restores the pick
 
 function activeTabState(): KcTabState | undefined {
   return state?.tabs.find((t) => t.id === state!.activeId);
@@ -81,25 +55,11 @@ function render(): void {
     if (tab.gamma === 'off') {
       pipebtn.classList.remove('on');
       pipelabel.textContent = 'Color: Off';
-      modeSel.value = 'off';
     } else {
       pipebtn.classList.add('on');
       pipelabel.textContent = (preset?.label ?? tab.gamma) + ' → display';
-      modeSel.value = 'custom';
-      lastGamma = tab.gamma;
     }
-    gammaSel.disabled = tab.gamma === 'off';
-    if (gammaSel.options.length === 0) {
-      for (const p of state.presets) {
-        const o = document.createElement('option');
-        o.value = p.id;
-        o.textContent = p.label;
-        gammaSel.appendChild(o);
-      }
-    }
-    gammaSel.value = tab.gamma === 'off' ? lastGamma : tab.gamma;
   }
-  pipeprofile.textContent = state.pipeline.label;
 }
 
 kc.onState((s) => {
@@ -118,38 +78,5 @@ fwdBtn.onclick = () => kc.send('kc:forward');
 $('reload').onclick = () => kc.send('kc:reload');
 $('newtab').onclick = () => kc.send('kc:new-tab');
 
-pipebtn.onclick = () => popover.classList.toggle('open');
-document.addEventListener('click', (e) => {
-  if (
-    popover.classList.contains('open') &&
-    !popover.contains(e.target as Node) &&
-    !pipebtn.contains(e.target as Node)
-  ) {
-    popover.classList.remove('open');
-  }
-});
-
-modeSel.onchange = () => {
-  kc.send('kc:set-gamma', modeSel.value === 'off' ? 'off' : lastGamma);
-};
-gammaSel.onchange = () => {
-  lastGamma = gammaSel.value;
-  kc.send('kc:set-gamma', gammaSel.value);
-};
-
-$('calibrate').onclick = async () => {
-  calresult.textContent = 'Measuring… (a probe tab will open briefly)';
-  try {
-    const summary = (await kc.invoke('kc:calibrate')) as {
-      rmsUncorrected: number;
-      rmsCorrected: number;
-      effectiveInterpGamma: number;
-    };
-    calresult.textContent =
-      `Interpretation gamma: ${summary.effectiveInterpGamma}\n` +
-      `RMS uncorrected: ${summary.rmsUncorrected}\n` +
-      `RMS corrected:  ${summary.rmsCorrected}`;
-  } catch (err) {
-    calresult.textContent = 'Calibration failed: ' + String(err);
-  }
-};
+pipebtn.onclick = () => kc.send('kc:toggle-popover');
+})();

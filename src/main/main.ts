@@ -34,6 +34,8 @@ interface Tab {
 }
 
 let win: BrowserWindow | null = null;
+let popoverView: WebContentsView | null = null;
+let popoverOpen = false;
 const tabs: Tab[] = [];
 let activeTabId = -1;
 let nextTabId = 1;
@@ -61,7 +63,7 @@ function activeTab(): Tab | undefined {
 function broadcastState(): void {
   if (!win) return;
   const profile = activePipelineProfile();
-  win.webContents.send('kc:state', {
+  const state = {
     tabs: tabs.map((t) => ({
       id: t.id,
       title: t.view.webContents.getTitle() || 'New Tab',
@@ -73,7 +75,59 @@ function broadcastState(): void {
     activeId: activeTabId,
     presets: SOURCE_PRESETS,
     pipeline: { label: profile.label, measured: profile.measured },
+  };
+  win.webContents.send('kc:state', state);
+  popoverView?.webContents.send('kc:state', state);
+}
+
+/**
+ * The pipeline popover lives in its own WebContentsView so it renders ABOVE
+ * the active tab view (base-window HTML is always occluded by child views).
+ * It covers the content area as a transparent backdrop; the card is anchored
+ * top-right inside popover.html. Hidden when closed so the page stays
+ * interactive.
+ */
+function ensurePopoverView(): void {
+  if (popoverView || !win) return;
+  popoverView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'ui-bridge.js'),
+      contextIsolation: true,
+    },
   });
+  popoverView.setBackgroundColor('#00000000');
+  popoverView.setVisible(false);
+  win.contentView.addChildView(popoverView);
+  popoverView.webContents.loadFile(
+    path.join(__dirname, '..', 'ui', 'popover.html'),
+  );
+}
+
+function layoutPopover(): void {
+  if (!win || !popoverView) return;
+  const [w, h] = win.getContentSize();
+  popoverView.setBounds({ x: 0, y: TOOLBAR_H, width: w, height: h - TOOLBAR_H });
+}
+
+/** Keep the popover topmost after tab views are (re)added. */
+function raisePopover(): void {
+  if (!win || !popoverView) return;
+  win.contentView.removeChildView(popoverView);
+  win.contentView.addChildView(popoverView);
+}
+
+function setPopoverOpen(open: boolean): void {
+  ensurePopoverView();
+  popoverOpen = open;
+  if (!popoverView) return;
+  if (open) {
+    layoutPopover();
+    raisePopover();
+    popoverView.setVisible(true);
+    broadcastState();
+  } else {
+    popoverView.setVisible(false);
+  }
 }
 
 function layoutTabs(): void {
@@ -82,6 +136,7 @@ function layoutTabs(): void {
   for (const t of tabs) {
     t.view.setBounds({ x: 0, y: TOOLBAR_H, width: w, height: h - TOOLBAR_H });
   }
+  layoutPopover();
 }
 
 function showTab(id: number): void {
@@ -89,6 +144,7 @@ function showTab(id: number): void {
   activeTabId = id;
   for (const t of tabs) t.view.setVisible(t.id === id);
   layoutTabs();
+  raisePopover();
   broadcastState();
 }
 
@@ -171,6 +227,8 @@ function wireIpc(): void {
   ipcMain.on('kc:close-tab', (_e, id: number) => closeTab(id));
   ipcMain.on('kc:select-tab', (_e, id: number) => showTab(id));
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
+  ipcMain.on('kc:toggle-popover', () => setPopoverOpen(!popoverOpen));
+  ipcMain.on('kc:close-popover', () => setPopoverOpen(false));
   ipcMain.on('kc:set-gamma', (_e, gamma: GammaSetting) => {
     const tab = activeTab();
     if (!tab) return;
@@ -215,6 +273,7 @@ function createWindow(): void {
     },
   });
   win.loadFile(path.join(__dirname, '..', 'ui', 'chrome.html'));
+  ensurePopoverView();
   win.on('resize', layoutTabs);
   win.webContents.on('did-finish-load', broadcastState);
   win.on('closed', () => {
@@ -332,9 +391,22 @@ app.whenReady().then(async () => {
       tab.view.webContents.once('did-finish-load', () => resolve()),
     );
     await new Promise((r) => setTimeout(r, 1500));
+
+    // Click the toolbar button (base layer) → main opens the popover view.
     await win!.webContents.executeJavaScript(
-      `document.getElementById('pipebtn').click();
-       document.getElementById('mode').value = 'custom';
+      `document.getElementById('pipebtn').click()`,
+    );
+    await new Promise((r) => setTimeout(r, 400));
+
+    // The fix under test: popover view must be VISIBLE and TOPMOST (above the
+    // tab view), not occluded like the old base-layer popover.
+    const children = win!.contentView.children;
+    const popoverVisible = popoverView?.getVisible() ?? false;
+    const popoverTopmost = children[children.length - 1] === popoverView;
+
+    // Drive the real controls inside the popover view's own document.
+    await popoverView!.webContents.executeJavaScript(
+      `document.getElementById('mode').value = 'custom';
        document.getElementById('mode').dispatchEvent(new Event('change'));
        document.getElementById('gamma').value = 'gamma24';
        document.getElementById('gamma').dispatchEvent(new Event('change'));`,
@@ -347,9 +419,16 @@ app.whenReady().then(async () => {
       `(() => { const v = document.querySelector('video');
          return v ? getComputedStyle(v).filter : 'no-video-on-page'; })()`,
     );
-    const shot = await win!.webContents.capturePage();
-    fs.writeFileSync(outDir + '/ui-check.png', shot.toPNG());
-    console.log('KC_UI ' + JSON.stringify({ badge, filter, gamma: tab.gamma }));
+    console.log(
+      'KC_UI ' +
+        JSON.stringify({
+          popoverVisible,
+          popoverTopmost,
+          badge,
+          filter,
+          gamma: tab.gamma,
+        }),
+    );
     } catch (err) {
       console.log('KC_UI ' + JSON.stringify({ error: String(err) }));
       process.exitCode = 1;
