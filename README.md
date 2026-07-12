@@ -53,28 +53,32 @@ The **only** feature needing an external dependency is the optional i1 hardware
 probe, which uses ArgyllCMS (`brew install argyll`). Everything else is
 self-contained.
 
-## Distributing updates
+## Updates
 
-The app self-updates from GitHub Releases (no Apple Developer ID needed — it
-downloads the new build, strips quarantine, swaps itself in /Applications, and
-relaunches).
+### For people you send the app to
 
-**One-time setup:**
-1. Create the GitHub repo and set `"updateRepo": "owner/name"` in package.json.
-2. `git remote add origin …` and push; install + auth the GitHub CLI (`gh auth login`).
+Nothing to do. Download the DMG from the
+[latest release](https://github.com/kootenaycolor/kootenay-browser/releases/latest),
+drag it to Applications, right-click → Open the first time (it's unsigned).
+After that the app **checks for updates on its own** — a few seconds after
+launch and once a day — and when the maintainer publishes a new version it
+downloads it, replaces itself, and relaunches. There's also **Kootenay Browser
+→ Check for Updates…** to do it on demand. Users never build or publish
+anything.
 
-**Every release:**
+### For the maintainer (publishing a new version)
+
 ```
 npm run publish -- 0.2.0 "What changed in this version"
 ```
 This bumps the version to the tag, builds the universal app + DMG, zips the
-.app, and creates the GitHub release with both assets. Installed copies pick it
-up within a day, or immediately via **Kootenay Browser → Check for Updates…**.
-New users download the DMG asset from the release.
+.app, and creates the GitHub release with both assets. Every installed copy
+picks it up automatically. The DMG asset on each release is also the
+current download link for brand-new users.
 
-The version bump and tag must match (the script enforces this) or the updater
-would re-offer the same build. First-time users need the **DMG that already
-contains the updater** — rebuild it once with `npm run dmg` after this is set up.
+The tag and the app's version must match (the script enforces this) or the
+updater would re-offer the same build. One-time setup is already done: repo
+created, `updateRepo` set in package.json, `gh` authenticated.
 
 ## Hardware probe (i1 Display Pro Plus)
 
