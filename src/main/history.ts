@@ -97,6 +97,20 @@ export function searchHistory(query: string, limit = 6): HistoryEntry[] {
   return scored.slice(0, limit).map((s) => s.e);
 }
 
+/** Most-recently-visited entries, newest first. */
+export function recentHistory(limit = 60): HistoryEntry[] {
+  return [...load().values()]
+    .sort((a, b) => b.lastVisit - a.lastVisit)
+    .slice(0, limit);
+}
+
+/** Most-visited entries (for the new-tab top sites). */
+export function topSites(limit = 8): HistoryEntry[] {
+  return [...load().values()]
+    .sort((a, b) => b.visits - a.visits || b.lastVisit - a.lastVisit)
+    .slice(0, limit);
+}
+
 export function clearHistory(): void {
   cache = new Map();
   try {

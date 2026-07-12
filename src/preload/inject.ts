@@ -8,7 +8,21 @@
  * the nonlinear code values directly, not a linearized version of them.
  */
 
-import { ipcRenderer } from 'electron';
+import { ipcRenderer, contextBridge } from 'electron';
+
+// Internal kootenay:// pages get a small privileged bridge for their data.
+if (location.protocol === 'kootenay:') {
+  contextBridge.exposeInMainWorld('kcInternal', {
+    data: (page: string) => ipcRenderer.invoke('kc:internal-data', page),
+    navigate: (url: string) => ipcRenderer.send('kc:internal-navigate', url),
+    clearHistory: () => ipcRenderer.send('kc:internal-clear-history'),
+    removeBookmark: (url: string) =>
+      ipcRenderer.send('kc:internal-remove-bookmark', url),
+    revealDownload: (p: string) =>
+      ipcRenderer.send('kc:internal-reveal-download', p),
+    onUpdate: (cb: () => void) => ipcRenderer.on('kc:internal-refresh', () => cb()),
+  });
+}
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const FILTER_ID = 'kc-gamma-filter';

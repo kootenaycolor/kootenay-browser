@@ -107,3 +107,14 @@ interface KcBridge {
 }
 
 declare const kc: KcBridge;
+
+// Bridge exposed to internal kootenay:// pages (by the inject preload).
+interface KcInternalBridge {
+  data(page: string): Promise<any>;
+  navigate(url: string): void;
+  clearHistory(): void;
+  removeBookmark(url: string): void;
+  revealDownload(path: string): void;
+  onUpdate(cb: () => void): void;
+}
+declare const kcInternal: KcInternalBridge;

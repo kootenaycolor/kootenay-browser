@@ -11,9 +11,12 @@ import {
   shell,
   session,
   dialog,
+  protocol,
+  net,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { pathToFileURL } from 'url';
 import { TransferId, SOURCE_PRESETS } from '../color/transfer';
 import { LUT_TAPS, buildCorrectionLut, lutToTableValues } from '../color/lut';
 import {
@@ -43,7 +46,14 @@ import {
   saveWindowBounds,
   windowBounds,
 } from './settings';
-import { recordVisit, updateTitle, searchHistory, clearHistory } from './history';
+import {
+  recordVisit,
+  updateTitle,
+  searchHistory,
+  recentHistory,
+  topSites,
+  clearHistory,
+} from './history';
 import { installMenu } from './menu';
 import { lightProfileFromGamma, lightProfileFromPoints } from '../color/presets';
 import { currentDisplay, allDisplays, DisplayInfo } from './displays';
@@ -58,6 +68,38 @@ import {
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// Internal pages served from kootenay://<name> (newtab, history, downloads,
+// bookmarks). Privileged so the inject preload can expose kcInternal to them.
+const INTERNAL_PAGES = new Set(['newtab', 'history', 'downloads', 'bookmarks']);
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'kootenay',
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
+
+function registerInternalProtocol(): void {
+  const uiDir = path.join(__dirname, '..', 'ui');
+  protocol.handle('kootenay', async (req) => {
+    const url = new URL(req.url);
+    const host = url.hostname || 'newtab';
+    let file: string;
+    if (url.pathname && url.pathname !== '/') {
+      // asset request (css/js) — resolve within ui/, no traversal
+      const base = path.basename(url.pathname);
+      file = path.join(uiDir, base);
+      if (!file.startsWith(uiDir)) {
+        return new Response('forbidden', { status: 403 });
+      }
+    } else {
+      const page = INTERNAL_PAGES.has(host) ? host : 'newtab';
+      file = path.join(uiDir, `page-${page}.html`);
+    }
+    if (!fs.existsSync(file)) return new Response('not found', { status: 404 });
+    return net.fetch(pathToFileURL(file).toString());
+  });
+}
+
 // Sites (Vimeo especially) UA-sniff the Electron token and serve degraded
 // players. Present as plain Chrome.
 app.whenReady().then(() => {
@@ -71,6 +113,7 @@ const TOOLBAR_H = 84;
 const BOOKMARKS_BAR_H = 32;
 const FINDBAR_H = 38;
 const DEFAULT_SOURCE: TransferId = 'gamma24';
+const NEWTAB_URL = 'kootenay://newtab';
 
 let findBarVisible = false;
 let htmlFullscreen = false;
@@ -589,7 +632,7 @@ function closeTab(id: number): void {
   win?.contentView.removeChildView(tab.view);
   tab.view.webContents.close();
   if (tabs.length === 0) {
-    createTab(homePage());
+    createTab(NEWTAB_URL);
   } else if (activeTabId === id) {
     showTab(tabs[Math.max(0, idx - 1)].id);
   } else {
@@ -629,7 +672,7 @@ function wireIpc(): void {
     activeTab()?.view.webContents.navigationHistory.goForward(),
   );
   ipcMain.on('kc:reload', () => stopOrReload());
-  ipcMain.on('kc:new-tab', () => void createTab(homePage()));
+  ipcMain.on('kc:new-tab', () => void createTab(NEWTAB_URL));
   ipcMain.on('kc:close-tab', (_e, id: number) => closeTab(id));
   ipcMain.on('kc:select-tab', (_e, id: number) => showTab(id));
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
@@ -682,6 +725,44 @@ function wireIpc(): void {
   ipcMain.on('kc:suggest-pick', (_e, url: string) => {
     hideSuggest();
     activeTab()?.view.webContents.loadURL(url);
+  });
+
+  // internal pages (kootenay://…) request data + drive navigation
+  ipcMain.handle('kc:internal-data', (_e, page: string) => {
+    if (page === 'newtab') {
+      return {
+        bookmarks: bookmarks(),
+        topSites: topSites(8).map((h) => ({ url: h.url, title: h.title })),
+        recent: recentHistory(12).map((h) => ({ url: h.url, title: h.title })),
+      };
+    }
+    if (page === 'history') {
+      return {
+        entries: recentHistory(400).map((h) => ({
+          url: h.url,
+          title: h.title,
+          visits: h.visits,
+          lastVisit: h.lastVisit,
+        })),
+      };
+    }
+    if (page === 'bookmarks') return { bookmarks: bookmarks() };
+    if (page === 'downloads') return { downloads };
+    return {};
+  });
+  ipcMain.on('kc:internal-navigate', (_e, url: string) => {
+    activeTab()?.view.webContents.loadURL(normalizeInput(url));
+  });
+  ipcMain.on('kc:internal-clear-history', () => {
+    clearHistory();
+    broadcastState();
+  });
+  ipcMain.on('kc:internal-remove-bookmark', (_e, url: string) => {
+    removeBookmark(url);
+    broadcastState();
+  });
+  ipcMain.on('kc:internal-reveal-download', (_e, p: string) => {
+    if (p) shell.showItemInFolder(p);
   });
 
   // settings General
@@ -994,22 +1075,44 @@ function createWindow(): void {
   });
 }
 
+interface DownloadRec {
+  name: string;
+  url: string;
+  path: string;
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted';
+  received: number;
+  total: number;
+  startedAt: number;
+}
+const downloads: DownloadRec[] = [];
+
 function setupDownloads(): void {
   session.defaultSession.on('will-download', (_e, item) => {
-    const name = item.getFilename();
-    win?.webContents.send('kc:download', { name, state: 'started' });
+    const rec: DownloadRec = {
+      name: item.getFilename(),
+      url: item.getURL(),
+      path: '',
+      state: 'progressing',
+      received: 0,
+      total: item.getTotalBytes(),
+      startedAt: Date.now(),
+    };
+    downloads.unshift(rec);
+    if (downloads.length > 100) downloads.pop();
+    const notifyChrome = () => win?.webContents.send('kc:download', rec);
+    notifyChrome();
+    item.on('updated', () => {
+      rec.received = item.getReceivedBytes();
+      rec.path = item.getSavePath();
+      notifyChrome();
+    });
     item.on('done', (_ev, state) => {
-      win?.webContents.send('kc:download', {
-        name,
-        state,
-        path: item.getSavePath(),
-      });
+      rec.state = state as DownloadRec['state'];
+      rec.path = item.getSavePath();
+      notifyChrome();
       if (state === 'completed' && Notification.isSupported()) {
-        const n = new Notification({
-          title: 'Download complete',
-          body: name,
-        });
-        n.on('click', () => shell.showItemInFolder(item.getSavePath()));
+        const n = new Notification({ title: 'Download complete', body: rec.name });
+        n.on('click', () => shell.showItemInFolder(rec.path));
         n.show();
       }
     });
@@ -1018,7 +1121,7 @@ function setupDownloads(): void {
 
 function installAppMenu(): void {
   installMenu({
-    newTab: () => void createTab(homePage()),
+    newTab: () => void createTab(NEWTAB_URL),
     closeTab: () => activeTabId !== -1 && closeTab(activeTabId),
     reopenTab: reopenClosedTab,
     reload: () => activeTab()?.view.webContents.reload(),
@@ -1065,6 +1168,7 @@ function restoreOrHome(): void {
 }
 
 app.whenReady().then(async () => {
+  registerInternalProtocol();
   wireIpc();
   setupDownloads();
   installAppMenu();
@@ -1289,6 +1393,31 @@ app.whenReady().then(async () => {
       console.error('KC_WIZ FAILED', err);
       process.exitCode = 1;
     }
+    app.quit();
+  } else if (process.argv.includes('--newtab-check')) {
+    const report: Record<string, unknown> = {};
+    try {
+      // seed a little history so the page has content
+      recordVisit('https://vimeo.com/', 'Vimeo');
+      recordVisit('https://frame.io/', 'Frame.io');
+      const t = createTab(NEWTAB_URL, {});
+      await new Promise<void>((r) =>
+        t.view.webContents.once('did-finish-load', () => r()),
+      );
+      await new Promise((r) => setTimeout(r, 800));
+      report.url = t.view.webContents.getURL();
+      report.title = t.view.webContents.getTitle();
+      report.dom = await t.view.webContents.executeJavaScript(
+        `({ hasSearch: !!document.getElementById('search'),
+            tiles: document.querySelectorAll('.tile').length,
+            recent: document.querySelectorAll('#recent .li').length,
+            kcInternal: typeof kcInternal }) `,
+      );
+    } catch (err) {
+      report.error = String(err);
+      process.exitCode = 1;
+    }
+    console.log('KC_NEWTAB ' + JSON.stringify(report, null, 2));
     app.quit();
   } else if (process.argv.includes('--qol-check')) {
     // Exercise the QoL surface headlessly: bookmark, find, suggestions,

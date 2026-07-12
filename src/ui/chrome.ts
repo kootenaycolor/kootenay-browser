@@ -66,7 +66,10 @@ function render(): void {
   const tab = activeTabState();
   if (tab) {
     if (document.activeElement !== urlbar) {
-      urlbar.value = tab.url.startsWith('file://') ? '' : tab.url;
+      urlbar.value =
+        tab.url.startsWith('file://') || tab.url.startsWith('kootenay:')
+          ? ''
+          : tab.url;
     }
     backBtn.disabled = !tab.canGoBack;
     fwdBtn.disabled = !tab.canGoForward;
@@ -88,6 +91,7 @@ function render(): void {
 
   star.textContent = state.currentBookmarked ? '★' : '☆';
   star.classList.toggle('on', state.currentBookmarked);
+  $('progress').classList.toggle('on', !!tab?.loading);
 
   renderBookmarksBar();
 }

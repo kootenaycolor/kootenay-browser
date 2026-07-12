@@ -67,6 +67,7 @@
   /* ── toolbar ───────────────────────────────────────────── */
   #toolbar {
     height: 46px;
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -152,6 +153,22 @@
     border-top: 1px solid var(--border);
   }
   #findbar.show { display: flex; }
+
+  /* ── loading progress (absolute at toolbar bottom, no reflow) ─ */
+  #progress {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 2px; background: transparent; overflow: hidden; display: none;
+  }
+  #progress.on { display: block; }
+  #progress::before {
+    content: ''; display: block; height: 100%; width: 40%;
+    background: var(--accent);
+    animation: indet 1.1s ease-in-out infinite;
+  }
+  @keyframes indet {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
   #findinput {
     width: 260px; height: 28px;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -185,6 +202,7 @@
       <button id="pipebtn" title="Color pipeline">
         <span class="swatch">◇</span><span id="pipelabel">Color: Off</span>
       </button>
+      <div id="progress"></div>
     </div>
     <div id="bookmarksbar"></div>
     <div id="findbar">
