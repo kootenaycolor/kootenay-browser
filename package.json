@@ -9,11 +9,14 @@
     "assets": "mkdir -p dist/ui dist/probe && cp src/ui/*.html src/ui/*.css dist/ui/ && cp src/probe/*.html dist/probe/ && cp -R src/probe/assets dist/probe/",
     "start": "npm run build && electron .",
     "measure": "npm run build && electron . --measure",
-    "test": "tsc -p tsconfig.json && node --test dist/test/"
+    "test": "tsc -p tsconfig.json && node --test dist/test/",
+    "package": "npm run build && electron-packager . \"Kootenay Browser\" --platform=darwin --arch=arm64 --out=out --overwrite --app-bundle-id=com.kootenay.browser --icon=build/icon --ignore=\"^/(src|scripts|out|\\.git|node_modules/\\.cache|test)\"",
+    "install-app": "npm run package && rm -rf \"/Applications/Kootenay Browser.app\" && cp -R \"out/Kootenay Browser-darwin-arm64/Kootenay Browser.app\" /Applications/ && echo \"Installed to /Applications/Kootenay Browser.app\""
   },
   "license": "MIT",
   "devDependencies": {
     "electron": "^37.0.0",
+    "@electron/packager": "^18.3.0",
     "typescript": "^5.6.0",
     "@types/node": "^20.0.0"
   }
