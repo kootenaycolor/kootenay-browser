@@ -1,128 +1,103 @@
 # Kootenay Browser
 
-A color-managed review browser for macOS. Declare how a video was graded
-("this file was uploaded in Gamma 2.4") and the browser applies a per-channel
-correction so Vimeo, YouTube, and Frame.io playback matches the mastering
-intent — cancelling the gamma shift macOS applies to tagged BT.709 video.
+**A Mac browser that makes web video look right.**
 
-Built on the findings of *Gamma Encoding for Accurate Web Delivery*
-(N. Regier, 2026): platforms are color-neutral (Vimeo strips NCLC tags,
-Frame.io ignores them), so the entire shift is OS/browser interpretation and
-can be measured once and cancelled exactly.
+When you send a review link — Vimeo, Frame.io, YouTube — the image usually comes
+back **washed out**: lifted shadows, flat contrast, not what you graded. That's
+not your grade. macOS misinterprets the color of web video, and every browser on
+the Mac shows it wrong. There's nothing the viewer can do about it… in a normal
+browser.
 
-## How it works
+Kootenay Browser fixes it. Tell it how a clip was graded and it cancels the
+shift, so what you see matches what left the suite.
 
-- A preload script attaches an SVG `feComponentTransfer` table filter
-  (256-tap per-channel LUT) to every `<video>` element. GPU-composited, no
-  pixel readback, works on top of any site's player.
-- The LUT is `f = m* ∘ C⁻¹`: `C` is the measured identity curve of the
-  filtered-video path (what the pipeline does to authored code values), and
-  `m*(v) = srgbOetf(EOTF_source(v))` is the framebuffer value that reproduces
-  the mastering luminance on the sRGB-TRC display.
-- **Measured on this machine:** Chromium interprets the BT.709 transfer tag
-  at an effective γ ≈ 2.21 on the filtered path (not the ~1.96 overlay-path
-  value). Correction verified at RMS 0.41/255 against the white paper's
-  display targets (uncorrected: 6.6).
-
-## Use
-
-```
-npm install
-npm start
-```
-
-Pick a gamma in the **Color Pipeline** popover (top right). The choice is
-remembered per domain. Type `probe` in the URL bar for the test-patch page;
-"Calibrate this display…" in the popover re-measures the pipeline and bakes a
-machine profile (`userData/calibration.json`).
+---
 
 ## Install
 
-- **From the DMG** (`npm run dmg` → `out/Kootenay-Browser.dmg`): open it, drag
-  **Kootenay Browser** onto **Applications**. Universal binary — runs on both
-  Apple Silicon and Intel Macs. Electron is bundled; the browser and all
-  color-correction features (Simple, Measured via screen probe or imported
-  data) need **no external dependencies**.
-- First launch on another Mac: it's ad-hoc signed, not Apple-notarized, so
-  Gatekeeper will ask — **right-click the app → Open** once (or run
-  `xattr -cr "/Applications/Kootenay Browser.app"`). After that it opens
-  normally.
-- Dev install to /Applications without a DMG: `npm run install-app`.
+1. Download **Kootenay-Browser.dmg** from the
+   [latest release](https://github.com/kootenaycolor/kootenay-browser/releases/latest).
+2. Open the DMG and drag **Kootenay Browser** onto **Applications**.
+3. The first time you open it, **right-click the app → Open** (macOS warns
+   because the app isn't from the App Store — this is expected). After that it
+   opens normally.
 
-The **only** feature needing an external dependency is the optional i1 hardware
-probe, which uses ArgyllCMS (`brew install argyll`). Everything else is
-self-contained.
+Works on any Mac — Apple Silicon or Intel.
+
+---
+
+## Using it
+
+Browse to your review link like you would in any browser. Then set the color:
+
+1. Click the **color button** at the top-right of the toolbar.
+2. Set **Method → Simple** and pick the **Source Gamma** the file was graded at
+   (for most professional deliveries that's **Gamma 2.4**).
+3. The image corrects instantly. Your choice is **remembered per site**, so
+   every link from that platform is corrected from then on.
+
+That's it for day-to-day use.
+
+### Simple vs. Measured
+
+- **Simple** — no setup, works on any display. It targets the standard web
+  gamma (2.2), which gets you close to the grade on essentially any monitor.
+  Use this by default.
+- **Measured** — for a reference display you want to match *exactly*. It uses a
+  hardware-probe reading (or measurements you import) to cancel that specific
+  monitor's behavior precisely. See below.
+
+The color button shows what's active (e.g. *"Gamma 2.4 → display"*), and a small
+badge marks tabs that are being corrected.
+
+---
+
+## Matching a display exactly (optional, needs a probe)
+
+If you have an **i1 Display Pro Plus** and want a reference-accurate match on a
+calibrated monitor:
+
+1. Install the free measurement tool once: open Terminal and run
+   `brew install argyll` (this is the only extra thing Kootenay ever needs, and
+   only for this feature).
+2. In **Color Settings → Measure with hardware probe…**, place the probe on the
+   on-screen patch and start. A fullscreen sequence reads your display, shows
+   live progress on the side, saves a profile for that monitor, and drops back
+   out on its own.
+3. Switch **Method → Measured** and that display is now matched exactly.
+
+Profiles are per-monitor and follow the window when you move it between screens.
+A built-in correction (i1 Display Pro Plus → PA32UCDM, referenced to a CR-300)
+is included and selected by default.
+
+---
 
 ## Updates
 
-### For people you send the app to
+**Automatic.** The app checks for new versions on its own and updates itself when
+one is available — you don't download anything again. You can also trigger a
+check any time from **Kootenay Browser → Check for Updates…** in the menu bar.
 
-Nothing to do. Download the DMG from the
-[latest release](https://github.com/kootenaycolor/kootenay-browser/releases/latest),
-drag it to Applications, right-click → Open the first time (it's unsigned).
-After that the app **checks for updates on its own** — a few seconds after
-launch and once a day — and when the maintainer publishes a new version it
-downloads it, replaces itself, and relaunches. There's also **Kootenay Browser
-→ Check for Updates…** to do it on demand. Users never build or publish
-anything.
+---
 
-### For the maintainer (publishing a new version)
+## Good to know
 
-```
-npm run publish -- 0.2.0 "What changed in this version"
-```
-This bumps the version to the tag, builds the universal app + DMG, zips the
-.app, and creates the GitHub release with both assets. Every installed copy
-picks it up automatically. The DMG asset on each release is also the
-current download link for brand-new users.
+- It's a full browser — tabs, bookmarks, history, downloads, find-in-page,
+  a start page, session restore. Use it as your review browser.
+- **Netflix and other DRM video won't play** (it can't decode protected
+  streams). Vimeo, Frame.io, YouTube, and normal web video all work.
+- Your logins and cookies are kept between sessions, like any browser.
+- For privacy, sites can't access your camera, mic, or location.
 
-The tag and the app's version must match (the script enforces this) or the
-updater would re-offer the same build. One-time setup is already done: repo
-created, `updateRepo` set in package.json, `gh` authenticated.
+---
 
-## Hardware probe (i1 Display Pro Plus)
+## The short version of why this happens
 
-Color Settings → current display → **Measure with hardware probe…** Requires
-ArgyllCMS (`brew install argyll`) and the probe on the panel being profiled.
-A fullscreen BT.709 patch video runs white-ref → 100→0% → drift check (±2%
-gate), optionally applies a probe-correction JSON (Custom Probe Measurement
-format), saves a physical-light profile for that display, then re-measures
-with the correction live and reports light-domain % error vs the Gamma 2.4
-intent.
+Professional SDR video is mastered at Gamma 2.4. macOS reads the standard web
+video tag as a *different* curve and lifts everything, so browsers show your
+grade washed out. Kootenay applies the exact inverse correction to the video as
+it plays. Based on the research paper *Gamma Encoding for Accurate Web Delivery*
+(N. Regier, 2026).
 
-## Dev
-
-```
-npm test                    # color math + probe driver unit tests
-npm run measure             # framebuffer pipeline measurement, prints RMS
-npx electron . --smoke      # loads Vimeo + YouTube, verifies filter attachment
-npx electron . --probe-sim  # full hardware-probe flow vs scripted simulator
-python3 scripts/make_patches.py       # regenerate the BT.709 probe video
-python3 scripts/make_step_patches.py  # regenerate the probe step video
-```
-
-## Browser features
-
-Tabs with favicons, loading spinners, audio 🔊/🔇 mute, middle-click close, and
-a right-click menu (duplicate / close others / close-to-right / reopen). Full
-app menu with standard shortcuts (⌘T/W/⇧T/R/L/F/D/Y, ⌘±, ⌘[ ], ⌘1–9).
-**Session + window restore**, **bookmarks** (⌘D star + bar + manager page),
-**history** (⌘Y page + frecency URL-bar suggestions), **find in page** (⌘F),
-right-click page **context menus**, **downloads** (⌘⇧J page with progress +
-completion notifications), a **New Tab page** (kootenay://newtab: search, top
-sites, bookmarks, recent), **home page** setting, **per-site zoom** memory,
-styled **error pages**, a loading progress bar, an HTTPS 🔒 / ⚠ security
-indicator, HTML-fullscreen video, cmd/middle-click → background tab, and **Clear
-Browsing Data** in Settings. Cookies/localStorage persist across launches.
-
-**Security:** all browser permissions (camera, mic, geolocation, USB, …) are
-denied by default — only fullscreen, pointer-lock, and sanitized clipboard-write
-are allowed, which is all video review needs.
-
-## Known limitations
-
-- No Widevine: DRM content (Netflix etc.) won't play. Vimeo/YouTube/Frame.io
-  review workflows are unaffected.
-- Correction operates in 8-bit compositing; a LUT with strong slope can band
-  on long gradients. For review purposes this is below noticeable.
-- Picture-in-picture is disabled on corrected videos (PiP drops CSS filters).
+Building from source or publishing updates? See
+[DEVELOPING.md](DEVELOPING.md).
