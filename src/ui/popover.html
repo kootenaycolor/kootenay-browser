@@ -48,7 +48,8 @@
     font-size: 11px; color: var(--text-secondary); line-height: 1.5;
   }
   #pipeline-note .cal { color: var(--accent); cursor: pointer; }
-  #calresult { margin-top: 8px; font-family: var(--font-mono); font-size: 10.5px; white-space: pre-wrap; }
+  #note-line { margin-bottom: 8px; }
+  #note-line .warn { color: #d9a441; }
 </style>
 </head>
 <body>
@@ -56,22 +57,22 @@
   <div id="popover">
     <h3>Color Pipeline</h3>
     <p class="sub">Declare how this file was graded. The browser offsets what
-    the platform and macOS do to it, so you see the intended image.</p>
+    the platform and your display do to it, so you see the intended image.</p>
     <div class="field">
-      <label>Management</label>
-      <select id="mode">
+      <label>Method</label>
+      <select id="method">
         <option value="off">Off</option>
-        <option value="custom">Custom</option>
+        <option value="simple">Simple (target 2.2)</option>
+        <option value="measured">Measured (this display)</option>
       </select>
     </div>
     <div class="field">
       <label>Source Gamma</label>
-      <select id="gamma"></select>
+      <select id="source"></select>
     </div>
     <div id="pipeline-note">
-      Pipeline: <span id="pipeprofile"></span><br>
-      <span class="cal" id="calibrate">Calibrate this display…</span>
-      <div id="calresult"></div>
+      <div id="note-line"></div>
+      <span class="cal" id="opensettings">Color settings…</span>
     </div>
   </div>
   <script src="popover.js"></script>

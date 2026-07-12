@@ -35,6 +35,7 @@ export interface MeasureHost {
   closeTab: (id: number) => void;
   probeUrl: string;
   sendLut: (tab: HostTab, values: string | null) => void;
+  display?: { id: number; label: string };
 }
 
 // Source-video geometry (must match make_patches.py and probe.html).
@@ -162,7 +163,18 @@ export async function runMeasurement(
     const identity = await captureStage(tab);
 
     const identityCurve = enforceMonotonic(identity.gradient);
-    const correctionLut = buildCorrectionLut('gamma24', identityCurve, LUT_TAPS);
+    const effectiveGamma = +fitInterpGamma(identityCurve).toFixed(3);
+    const profile: PipelineProfile = {
+      id: 'fb-' + Date.now(),
+      label: `${host.display?.label ?? 'This display'} — probe γ ${effectiveGamma}`,
+      kind: 'framebuffer',
+      identityCurve,
+      effectiveGamma,
+      displayId: host.display?.id,
+      displayLabel: host.display?.label,
+      measuredAt: new Date().toISOString(),
+    };
+    const correctionLut = buildCorrectionLut('gamma24', profile, LUT_TAPS);
     host.sendLut(tab, lutToTableValues(correctionLut));
     const corrected = await captureStage(tab);
 
@@ -178,13 +190,6 @@ export async function runMeasurement(
         })(),
     );
 
-    const profile: PipelineProfile = {
-      id: 'measured-' + new Date().toISOString().slice(0, 10),
-      label: 'This Mac (measured)',
-      identityCurve,
-      measured: true,
-    };
-
     return {
       profile,
       summary: {
@@ -194,9 +199,7 @@ export async function runMeasurement(
         targets: targets.map((v) => +v.toFixed(1)),
         rmsUncorrected: +rms(identity.patches, targets).toFixed(2),
         rmsCorrected: +rms(corrected.patches, targets).toFixed(2),
-        effectiveInterpGamma: +fitInterpGamma(
-          enforceMonotonic(identity.gradient),
-        ).toFixed(3),
+        effectiveInterpGamma: effectiveGamma,
       },
       stages: { unfiltered, identity, corrected },
     };

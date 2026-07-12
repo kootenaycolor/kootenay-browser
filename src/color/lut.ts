@@ -1,27 +1,33 @@
 /**
  * Correction LUT construction.
  *
- * Model of the filtered-video path in Chromium/macOS, established by the
- * gamma white paper (Method B) and the in-app measurement harness:
+ * The filter is a per-channel table applied to the video in content space,
+ * upstream of macOS compositing/ColorSync. A profile describes what the rest
+ * of the chain does; we invert it so the intended mastering luminance is what
+ * reaches the eye.
  *
- *   authored code v ──decode+tag interpretation──▶ intermediate x = C(v)
- *                 ──our filter LUT f──▶ framebuffer m = f(x)
- *                 ──display EOTF (sRGB-curve P3 panel)──▶ light
+ * Pixel path:  authored v ──▶ [our LUT f] ──▶ downstream ──▶ observed
  *
- * C is the measured "identity curve": framebuffer values observed with an
- * identity filter applied. The display's gray-axis transfer is the sRGB
- * curve (Display P3 uses the sRGB TRC), so to reproduce the mastering
- * intent — light = EOTF_source(v) — the framebuffer target is
- *   m*(v) = srgbOetf(eotf(source, v))
- * and the filter must be
- *   f = m* ∘ C⁻¹
+ * Let R be the downstream response measured with an identity filter (observed
+ * as a function of the value entering it). To hit a target observation T(v):
+ *     R(f(v)) = T(v)   ⇒   f(v) = R⁻¹(T(v))
+ *
+ * By kind:
+ *   simple      — no R to invert; transcode source→target directly:
+ *                   f(v) = oetf(target, eotf(source, v))
+ *   framebuffer — R = identityCurve maps entering value → framebuffer code;
+ *                 target is the sRGB-encoded intended luminance:
+ *                   f(v) = R⁻¹( srgbOetf(eotf(source, v)) )
+ *   light       — R = identityCurve maps entering value → panel luminance;
+ *                 target is the intended luminance itself:
+ *                   f(v) = R⁻¹( eotf(source, v) )
  */
 
-import { TransferId, eotf, srgbOetf } from './transfer';
+import { TransferId, eotf, oetf, srgbOetf } from './transfer';
+import { PipelineProfile } from './presets';
 
 export const LUT_TAPS = 256;
 
-/** Identity table (also used to force the video off the overlay path). */
 export function identityLut(taps: number = LUT_TAPS): number[] {
   return Array.from({ length: taps }, (_, i) => i / (taps - 1));
 }
@@ -35,7 +41,6 @@ export function invertCurve(samples: number[]): (y: number) => number {
   return (y: number) => {
     if (y <= samples[0]) return 0;
     if (y >= samples[n - 1]) return 1;
-    // binary search for the bracketing segment
     let lo = 0;
     let hi = n - 1;
     while (hi - lo > 1) {
@@ -49,21 +54,33 @@ export function invertCurve(samples: number[]): (y: number) => number {
   };
 }
 
-/**
- * Build the correction LUT for a declared source transfer, given the
- * measured (or modeled) identity curve C sampled at LUT_TAPS points.
- */
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+
+/** Build the correction LUT for a declared source transfer and a profile. */
 export function buildCorrectionLut(
   source: TransferId,
-  identityCurve: number[],
+  profile: PipelineProfile,
   taps: number = LUT_TAPS,
 ): number[] {
-  const cInv = invertCurve(identityCurve);
-  const lut: number[] = new Array(taps);
+  const rInv =
+    profile.kind === 'simple'
+      ? null
+      : invertCurve(profile.identityCurve ?? identityLut(taps));
+  const target: TransferId = profile.target ?? 'gamma22';
+
+  const lut = new Array<number>(taps);
   for (let i = 0; i < taps; i++) {
-    const x = i / (taps - 1); // intermediate value entering the filter
-    const v = cInv(x); // authored code value that produced it
-    lut[i] = srgbOetf(eotf(source, v));
+    const v = i / (taps - 1);
+    const intendedLight = eotf(source, v);
+    let f: number;
+    if (profile.kind === 'simple') {
+      f = oetf(target, intendedLight);
+    } else if (profile.kind === 'light') {
+      f = rInv!(intendedLight);
+    } else {
+      f = rInv!(srgbOetf(intendedLight));
+    }
+    lut[i] = clamp01(f);
   }
   return lut;
 }

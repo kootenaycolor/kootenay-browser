@@ -25,7 +25,7 @@ function render(): void {
     el.className =
       'tab' +
       (t.id === state.activeId ? ' active' : '') +
-      (t.gamma !== 'off' ? ' managed' : '');
+      (t.method !== 'off' ? ' managed' : '');
     const dot = document.createElement('span');
     dot.className = 'dot';
     const title = document.createElement('span');
@@ -51,13 +51,16 @@ function render(): void {
     backBtn.disabled = !tab.canGoBack;
     fwdBtn.disabled = !tab.canGoForward;
 
-    const preset = state.presets.find((p) => p.id === tab.gamma);
-    if (tab.gamma === 'off') {
+    const source = state.presets.find((p) => p.id === tab.source);
+    if (tab.method === 'off') {
       pipebtn.classList.remove('on');
       pipelabel.textContent = 'Color: Off';
     } else {
       pipebtn.classList.add('on');
-      pipelabel.textContent = (preset?.label ?? tab.gamma) + ' → display';
+      const dest = tab.method === 'simple' ? state.simpleTarget : 'display';
+      const destLabel =
+        state.presets.find((p) => p.id === dest)?.label ?? dest;
+      pipelabel.textContent = `${source?.label ?? tab.source} → ${destLabel}`;
     }
   }
 }

@@ -1,14 +1,24 @@
-import { app, BrowserWindow, WebContentsView, ipcMain } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
 import * as path from 'path';
 import { TransferId, SOURCE_PRESETS } from '../color/transfer';
 import { LUT_TAPS, buildCorrectionLut, lutToTableValues } from '../color/lut';
 import {
-  activePipelineProfile,
-  saveCalibration,
+  Method,
+  DomainDefault,
   domainDefault,
   setDomainDefault,
+  simpleTarget,
+  setSimpleTarget,
+  profilesForDisplay,
+  activeProfileId,
+  addProfileForDisplay,
+  setActiveProfile,
+  deleteProfile,
+  resolveProfile,
   normalizeHost,
 } from './settings';
+import { lightProfileFromGamma, lightProfileFromPoints } from '../color/presets';
+import { currentDisplay, allDisplays, DisplayInfo } from './displays';
 import { runMeasurement } from './calibration';
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -24,60 +34,121 @@ app.whenReady().then(() => {
 
 const TOOLBAR_H = 84;
 const HOME_URL = 'https://vimeo.com';
-
-export type GammaSetting = TransferId | 'off';
+const DEFAULT_SOURCE: TransferId = 'gamma24';
 
 interface Tab {
   id: number;
   view: WebContentsView;
-  gamma: GammaSetting;
+  method: Method;
+  source: TransferId;
 }
 
 let win: BrowserWindow | null = null;
 let popoverView: WebContentsView | null = null;
 let popoverOpen = false;
+let settingsWin: BrowserWindow | null = null;
+let activeDisplayId = -1;
 const tabs: Tab[] = [];
 let activeTabId = -1;
 let nextTabId = 1;
 
 function probeUrl(): string {
-  return (
-    'file://' + path.join(__dirname, '..', 'probe', 'probe.html')
-  );
+  return 'file://' + path.join(__dirname, '..', 'probe', 'probe.html');
 }
 
-function tableValuesFor(gamma: GammaSetting): string | null {
-  if (gamma === 'off') return null;
-  const profile = activePipelineProfile();
-  return lutToTableValues(buildCorrectionLut(gamma, profile.identityCurve, LUT_TAPS));
+function curDisplay(): DisplayInfo | null {
+  return win ? currentDisplay(win) : null;
+}
+
+function tableValuesFor(tab: Tab): string | null {
+  if (tab.method === 'off') return null;
+  const displayId = curDisplay()?.id ?? activeDisplayId;
+  const { profile } = resolveProfile(tab.method, displayId);
+  return lutToTableValues(buildCorrectionLut(tab.source, profile, LUT_TAPS));
+}
+
+/**
+ * Deliver the LUT to EVERY frame, not just the main one. Platform embeds
+ * (a Vimeo/YouTube/etc. player iframe on a third-party site) put the <video>
+ * in a cross-origin subframe; webContents.send reaches only the main frame,
+ * so those embeds would go uncorrected. The preload runs in subframes
+ * (nodeIntegrationInSubFrames), so we fan the message out to all of them.
+ */
+function sendLutToAllFrames(wc: Electron.WebContents, values: string | null): void {
+  const main = wc.mainFrame;
+  if (!main) {
+    wc.send('kc:lut', values);
+    return;
+  }
+  for (const frame of main.framesInSubtree) {
+    try {
+      frame.send('kc:lut', values);
+    } catch {
+      /* frame detached mid-navigation */
+    }
+  }
 }
 
 function pushLut(tab: Tab): void {
-  tab.view.webContents.send('kc:lut', tableValuesFor(tab.gamma));
+  sendLutToAllFrames(tab.view.webContents, tableValuesFor(tab));
+}
+
+function pushAllLuts(): void {
+  for (const t of tabs) pushLut(t);
 }
 
 function activeTab(): Tab | undefined {
   return tabs.find((t) => t.id === activeTabId);
 }
 
-function broadcastState(): void {
-  if (!win) return;
-  const profile = activePipelineProfile();
-  const state = {
+function buildState() {
+  const display = curDisplay();
+  const active = activeTab();
+  const resolved =
+    active && active.method !== 'off' && display
+      ? resolveProfile(active.method, display.id)
+      : null;
+  return {
     tabs: tabs.map((t) => ({
       id: t.id,
       title: t.view.webContents.getTitle() || 'New Tab',
       url: t.view.webContents.getURL(),
-      gamma: t.gamma,
+      method: t.method,
+      source: t.source,
       canGoBack: t.view.webContents.navigationHistory.canGoBack(),
       canGoForward: t.view.webContents.navigationHistory.canGoForward(),
     })),
     activeId: activeTabId,
     presets: SOURCE_PRESETS,
-    pipeline: { label: profile.label, measured: profile.measured },
+    simpleTarget: simpleTarget(),
+    display: display ? { id: display.id, label: display.label } : null,
+    activeProfile: resolved
+      ? { label: resolved.profile.label, kind: resolved.profile.kind, fellBack: resolved.fellBack }
+      : null,
   };
+}
+
+function broadcastState(): void {
+  if (!win) return;
+  const state = buildState();
   win.webContents.send('kc:state', state);
   popoverView?.webContents.send('kc:state', state);
+  settingsWin?.webContents.send('kc:settings-state', buildSettingsState());
+}
+
+function buildSettingsState() {
+  const display = curDisplay();
+  return {
+    presets: SOURCE_PRESETS,
+    simpleTarget: simpleTarget(),
+    displays: allDisplays().map((d) => ({
+      ...d,
+      current: d.id === display?.id,
+      profiles: profilesForDisplay(d.id),
+      activeId: activeProfileId(d.id),
+    })),
+    currentDisplayId: display?.id ?? null,
+  };
 }
 
 /**
@@ -148,7 +219,10 @@ function showTab(id: number): void {
   broadcastState();
 }
 
-function createTab(url: string, opts: { gamma?: GammaSetting } = {}): Tab {
+function createTab(
+  url: string,
+  opts: { method?: Method; source?: TransferId } = {},
+): Tab {
   const view = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'inject.js'),
@@ -157,7 +231,12 @@ function createTab(url: string, opts: { gamma?: GammaSetting } = {}): Tab {
       backgroundThrottling: false,
     },
   });
-  const tab: Tab = { id: nextTabId++, view, gamma: opts.gamma ?? 'off' };
+  const tab: Tab = {
+    id: nextTabId++,
+    view,
+    method: opts.method ?? 'off',
+    source: opts.source ?? DEFAULT_SOURCE,
+  };
   tabs.push(tab);
   win!.contentView.addChildView(view);
 
@@ -173,7 +252,10 @@ function createTab(url: string, opts: { gamma?: GammaSetting } = {}): Tab {
     try {
       const host = normalizeHost(new URL(wc.getURL()).hostname);
       const def = domainDefault(host);
-      if (def !== undefined) tab.gamma = def;
+      if (def) {
+        tab.method = def.method;
+        tab.source = def.source;
+      }
     } catch {
       /* non-http urls */
     }
@@ -229,32 +311,113 @@ function wireIpc(): void {
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
   ipcMain.on('kc:toggle-popover', () => setPopoverOpen(!popoverOpen));
   ipcMain.on('kc:close-popover', () => setPopoverOpen(false));
-  ipcMain.on('kc:set-gamma', (_e, gamma: GammaSetting) => {
-    const tab = activeTab();
-    if (!tab) return;
-    tab.gamma = gamma;
-    pushLut(tab);
+  ipcMain.on('kc:open-settings', () => openSettingsWindow());
+
+  const persistTabDefault = (tab: Tab) => {
     try {
-      const host = normalizeHost(
-        new URL(tab.view.webContents.getURL()).hostname,
-      );
-      if (host) setDomainDefault(host, gamma);
+      const host = normalizeHost(new URL(tab.view.webContents.getURL()).hostname);
+      if (host) setDomainDefault(host, { method: tab.method, source: tab.source });
     } catch {
       /* non-http urls */
     }
+  };
+
+  ipcMain.on('kc:set-method', (_e, method: Method) => {
+    const tab = activeTab();
+    if (!tab) return;
+    tab.method = method;
+    pushLut(tab);
+    persistTabDefault(tab);
     broadcastState();
   });
+  ipcMain.on('kc:set-source', (_e, source: TransferId) => {
+    const tab = activeTab();
+    if (!tab) return;
+    tab.source = source;
+    pushLut(tab);
+    persistTabDefault(tab);
+    broadcastState();
+  });
+  ipcMain.on('kc:set-simple-target', (_e, target: TransferId) => {
+    setSimpleTarget(target);
+    pushAllLuts();
+    broadcastState();
+  });
+
   ipcMain.handle('kc:calibrate', async () => {
+    const display = curDisplay() ?? undefined;
     const result = await runMeasurement({
-      createTab,
+      createTab: (url) => createTab(url, { method: 'off' }),
       closeTab,
       probeUrl: probeUrl(),
       sendLut: (tab, values) => tab.view.webContents.send('kc:lut', values),
+      display,
     });
-    saveCalibration(result.profile);
-    for (const t of tabs) pushLut(t);
+    if (display) addProfileForDisplay(display.id, result.profile);
+    pushAllLuts();
     broadcastState();
     return result.summary;
+  });
+
+  // Physical-light import: quick (effective gamma) or full (patch points).
+  ipcMain.handle(
+    'kc:import-light',
+    (
+      _e,
+      arg: { gamma?: number; points?: { input: number; luminance: number }[] },
+    ) => {
+      const display = curDisplay();
+      if (!display) return { ok: false, error: 'no display' };
+      const opts = { displayId: display.id, displayLabel: display.label };
+      const profile =
+        arg.points && arg.points.length >= 2
+          ? lightProfileFromPoints(arg.points, opts)
+          : arg.gamma
+            ? lightProfileFromGamma(arg.gamma, opts)
+            : null;
+      if (!profile) return { ok: false, error: 'need gamma or ≥2 points' };
+      addProfileForDisplay(display.id, profile);
+      pushAllLuts();
+      broadcastState();
+      return { ok: true, id: profile.id };
+    },
+  );
+
+  ipcMain.on('kc:set-active-profile', (_e, displayId: number, id: string) => {
+    setActiveProfile(displayId, id);
+    pushAllLuts();
+    broadcastState();
+  });
+  ipcMain.on('kc:delete-profile', (_e, displayId: number, id: string) => {
+    deleteProfile(displayId, id);
+    pushAllLuts();
+    broadcastState();
+  });
+}
+
+function openSettingsWindow(): void {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.focus();
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 560,
+    height: 680,
+    title: 'Color Settings',
+    parent: win ?? undefined,
+    backgroundColor: '#262624',
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'ui-bridge.js'),
+      contextIsolation: true,
+    },
+  });
+  settingsWin.loadFile(path.join(__dirname, '..', 'ui', 'settings.html'));
+  settingsWin.webContents.on('did-finish-load', () =>
+    settingsWin?.webContents.send('kc:settings-state', buildSettingsState()),
+  );
+  settingsWin.on('closed', () => {
+    settingsWin = null;
   });
 }
 
@@ -274,7 +437,21 @@ function createWindow(): void {
   });
   win.loadFile(path.join(__dirname, '..', 'ui', 'chrome.html'));
   ensurePopoverView();
+  activeDisplayId = curDisplay()?.id ?? -1;
   win.on('resize', layoutTabs);
+  // When the window crosses to another monitor, the measured correction for
+  // that display takes over.
+  const onMaybeDisplayChange = () => {
+    const id = curDisplay()?.id ?? -1;
+    if (id !== activeDisplayId) {
+      activeDisplayId = id;
+      pushAllLuts();
+      broadcastState();
+    }
+  };
+  win.on('move', onMaybeDisplayChange);
+  win.on('moved', onMaybeDisplayChange);
+  screen.on('display-metrics-changed', onMaybeDisplayChange);
   win.webContents.on('did-finish-load', broadcastState);
   win.on('closed', () => {
     win = null;
@@ -289,13 +466,15 @@ app.whenReady().then(async () => {
     // Headless-ish self-test: measure the pipeline, bake calibration, exit.
     win!.webContents.once('did-finish-load', async () => {
       try {
+        const display = curDisplay() ?? undefined;
         const result = await runMeasurement({
-          createTab,
+          createTab: (url) => createTab(url, { method: 'off' }),
           closeTab,
           probeUrl: probeUrl(),
           sendLut: (tab, values) => tab.view.webContents.send('kc:lut', values),
+          display,
         });
-        saveCalibration(result.profile);
+        if (display) addProfileForDisplay(display.id, result.profile);
         console.log(JSON.stringify(result.summary, null, 2));
         const out = process.argv
           .find((a) => a.startsWith('--out='))
@@ -319,7 +498,7 @@ app.whenReady().then(async () => {
     const report: Record<string, unknown> = {};
     const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const loadAndCheck = async (name: string, url: string) => {
-      const tab = createTab(url, { gamma: 'off' });
+      const tab = createTab(url, { method: 'off' });
       await new Promise<void>((resolve) =>
         tab.view.webContents.once('did-finish-load', () => resolve()),
       );
@@ -331,7 +510,7 @@ app.whenReady().then(async () => {
         `(() => { const v = document.querySelector('video');
            return v ? { readyState: v.readyState, t: v.currentTime } : null; })()`,
       );
-      tab.gamma = 'gamma24';
+      tab.method = 'simple';
       pushLut(tab);
       await settle(1500);
       entry.filter = await tab.view.webContents.executeJavaScript(
@@ -346,7 +525,7 @@ app.whenReady().then(async () => {
     try {
       // Vimeo: land on staff picks, follow the first video link.
       const vTab = createTab('https://vimeo.com/channels/staffpicks', {
-        gamma: 'off',
+        method: 'off',
       });
       await new Promise<void>((resolve) =>
         vTab.view.webContents.once('did-finish-load', () => resolve()),
@@ -386,7 +565,7 @@ app.whenReady().then(async () => {
         win!.webContents.once('did-finish-load', () => resolve()),
       );
     }
-    const tab = createTab('https://vimeo.com', { gamma: 'off' });
+    const tab = createTab('https://vimeo.com', { method: 'off' });
     await new Promise<void>((resolve) =>
       tab.view.webContents.once('did-finish-load', () => resolve()),
     );
@@ -406,10 +585,10 @@ app.whenReady().then(async () => {
 
     // Drive the real controls inside the popover view's own document.
     await popoverView!.webContents.executeJavaScript(
-      `document.getElementById('mode').value = 'custom';
-       document.getElementById('mode').dispatchEvent(new Event('change'));
-       document.getElementById('gamma').value = 'gamma24';
-       document.getElementById('gamma').dispatchEvent(new Event('change'));`,
+      `document.getElementById('method').value = 'simple';
+       document.getElementById('method').dispatchEvent(new Event('change'));
+       document.getElementById('source').value = 'gamma24';
+       document.getElementById('source').dispatchEvent(new Event('change'));`,
     );
     await new Promise((r) => setTimeout(r, 800));
     const badge = await win!.webContents.executeJavaScript(
@@ -426,7 +605,8 @@ app.whenReady().then(async () => {
           popoverTopmost,
           badge,
           filter,
-          gamma: tab.gamma,
+          method: tab.method,
+          source: tab.source,
         }),
     );
     } catch (err) {
@@ -434,12 +614,51 @@ app.whenReady().then(async () => {
       process.exitCode = 1;
     }
     app.quit();
+  } else if (process.argv.includes('--embed-check')) {
+    // Prove the cross-origin iframe embed path: load a file:// page whose
+    // <video> lives inside a youtube.com iframe, apply Simple, and confirm the
+    // filter reaches the subframe's video (webContents.send would not).
+    const embedUrl =
+      'file://' + path.join(__dirname, '..', 'probe', 'embed-test.html');
+    const report: Record<string, unknown> = {};
+    try {
+      const tab = createTab(embedUrl, { method: 'off' });
+      await new Promise<void>((resolve) =>
+        tab.view.webContents.once('did-finish-load', () => resolve()),
+      );
+      await new Promise((r) => setTimeout(r, 6000));
+      tab.method = 'simple';
+      pushLut(tab);
+      await new Promise((r) => setTimeout(r, 1500));
+
+      const frames = tab.view.webContents.mainFrame.framesInSubtree;
+      report.frameCount = frames.length;
+      const results: unknown[] = [];
+      for (const f of frames) {
+        try {
+          const r = await f.executeJavaScript(
+            `(() => { const v = document.querySelector('video');
+               return v ? { origin: location.origin,
+                 filter: getComputedStyle(v).filter } : null; })()`,
+          );
+          if (r) results.push(r);
+        } catch {
+          /* frame gone */
+        }
+      }
+      report.videoFrames = results;
+    } catch (err) {
+      report.error = String(err);
+      process.exitCode = 1;
+    }
+    console.log('KC_EMBED ' + JSON.stringify(report, null, 2));
+    app.quit();
   } else if (process.argv.includes('--verify-screen')) {
     // Open the probe with the Gamma 2.4 correction active and report where
     // the video sits on screen, so an external screencapture can read the
     // post-ColorSync framebuffer (white paper Probe 2).
     win!.setPosition(40, 40);
-    const tab = createTab(probeUrl(), { gamma: 'gamma24' });
+    const tab = createTab(probeUrl(), { method: 'measured', source: 'gamma24' });
     tab.view.webContents.once('did-finish-load', () => {
       setTimeout(() => {
         const b = win!.getContentBounds();

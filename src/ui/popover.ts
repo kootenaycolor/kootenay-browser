@@ -4,64 +4,58 @@
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
-const modeSel = $<HTMLSelectElement>('mode');
-const gammaSel = $<HTMLSelectElement>('gamma');
-const pipeprofile = $('pipeprofile');
-const calresult = $('calresult');
+const methodSel = $<HTMLSelectElement>('method');
+const sourceSel = $<HTMLSelectElement>('source');
+const noteLine = $('note-line');
 
-let lastGamma = 'gamma24';
+let lastSource = 'gamma24';
 
 function render(state: KcState): void {
   const tab = state.tabs.find((t) => t.id === state.activeId);
-  if (gammaSel.options.length === 0) {
+  if (sourceSel.options.length === 0) {
     for (const p of state.presets) {
       const o = document.createElement('option');
       o.value = p.id;
       o.textContent = p.label;
-      gammaSel.appendChild(o);
+      sourceSel.appendChild(o);
     }
   }
   if (tab) {
-    if (tab.gamma === 'off') {
-      modeSel.value = 'off';
-      gammaSel.disabled = true;
-      gammaSel.value = lastGamma;
+    methodSel.value = tab.method;
+    sourceSel.disabled = tab.method === 'off';
+    sourceSel.value = tab.source;
+    lastSource = tab.source;
+  }
+
+  // Contextual note under the controls.
+  if (!tab || tab.method === 'off') {
+    noteLine.textContent = 'No correction applied.';
+  } else if (tab.method === 'simple') {
+    noteLine.textContent = `Display-blind. Targeting ${labelFor(
+      state,
+      state.simpleTarget,
+    )}. Close on most displays, exact on none.`;
+  } else {
+    const d = state.display?.label ?? 'this display';
+    if (state.activeProfile && !state.activeProfile.fellBack) {
+      noteLine.textContent = `Using measured profile for ${d}: ${state.activeProfile.label}.`;
     } else {
-      modeSel.value = 'custom';
-      gammaSel.disabled = false;
-      gammaSel.value = tab.gamma;
-      lastGamma = tab.gamma;
+      noteLine.innerHTML = `<span class="warn">No measurement for ${d} — falling back to Simple. Measure it in Color settings.</span>`;
     }
   }
-  pipeprofile.textContent = state.pipeline.label;
+}
+
+function labelFor(state: KcState, id: string): string {
+  return state.presets.find((p) => p.id === id)?.label ?? id;
 }
 
 kc.onState(render);
 
-modeSel.onchange = () => {
-  kc.send('kc:set-gamma', modeSel.value === 'off' ? 'off' : lastGamma);
+methodSel.onchange = () => kc.send('kc:set-method', methodSel.value);
+sourceSel.onchange = () => {
+  lastSource = sourceSel.value;
+  kc.send('kc:set-source', sourceSel.value);
 };
-gammaSel.onchange = () => {
-  lastGamma = gammaSel.value;
-  kc.send('kc:set-gamma', gammaSel.value);
-};
-
+$('opensettings').onclick = () => kc.send('kc:open-settings');
 $('backdrop').onclick = () => kc.send('kc:close-popover');
-
-$('calibrate').onclick = async () => {
-  calresult.textContent = 'Measuring… (a probe tab will open briefly)';
-  try {
-    const summary = (await kc.invoke('kc:calibrate')) as {
-      rmsUncorrected: number;
-      rmsCorrected: number;
-      effectiveInterpGamma: number;
-    };
-    calresult.textContent =
-      `Interpretation gamma: ${summary.effectiveInterpGamma}\n` +
-      `RMS uncorrected: ${summary.rmsUncorrected}\n` +
-      `RMS corrected:  ${summary.rmsCorrected}`;
-  } catch (err) {
-    calresult.textContent = 'Calibration failed: ' + String(err);
-  }
-};
 })();
