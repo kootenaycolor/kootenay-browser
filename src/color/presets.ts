@@ -38,6 +38,17 @@ export interface PipelineProfile {
   /** Fitted effective gamma, for display in the UI. */
   effectiveGamma?: number;
   measuredAt?: string;
+  /** Physical verify-pass results (hardware-probe profiles). */
+  verify?: {
+    rmsPctError: number;
+    driftPct: number;
+    patches: {
+      signalPct: number;
+      targetRel: number;
+      achievedRel: number;
+      pctError: number;
+    }[];
+  };
 }
 
 /** A pure-power light response x^gamma sampled over input [0,1]. */

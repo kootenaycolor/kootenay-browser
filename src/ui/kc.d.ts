@@ -36,6 +36,39 @@ interface KcProfile {
   kind: string;
   effectiveGamma?: number;
   measuredAt?: string;
+  verify?: {
+    rmsPctError: number;
+    driftPct: number;
+    patches: { signalPct: number; pctError: number }[];
+  };
+}
+
+interface KcProbeStatus {
+  state: 'ready' | 'argyll-missing' | 'no-probe';
+  device?: string;
+  message?: string;
+}
+
+interface KcProbeProgress {
+  phase: 'measure' | 'drift' | 'verify';
+  label: string;
+  index: number;
+  total: number;
+  Y?: number;
+  done?: boolean;
+}
+
+interface KcProbeResult {
+  ok: boolean;
+  error?: string;
+  fittedGamma?: number;
+  driftPct?: number;
+  driftValid?: boolean;
+  profileLabel?: string;
+  verify?: {
+    rmsPctError: number;
+    patches: { signalPct: number; targetRel: number; achievedRel: number; pctError: number }[];
+  };
 }
 
 interface KcDisplayState {

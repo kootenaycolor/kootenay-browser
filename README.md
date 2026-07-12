@@ -36,13 +36,25 @@ remembered per domain. Type `probe` in the URL bar for the test-patch page;
 "Calibrate this display…" in the popover re-measures the pipeline and bakes a
 machine profile (`userData/calibration.json`).
 
+## Hardware probe (i1 Display Pro Plus)
+
+Color Settings → current display → **Measure with hardware probe…** Requires
+ArgyllCMS (`brew install argyll`) and the probe on the panel being profiled.
+A fullscreen BT.709 patch video runs white-ref → 100→0% → drift check (±2%
+gate), optionally applies a probe-correction JSON (Custom Probe Measurement
+format), saves a physical-light profile for that display, then re-measures
+with the correction live and reports light-domain % error vs the Gamma 2.4
+intent.
+
 ## Dev
 
 ```
-npm test                # color math unit tests
-npm run measure         # automated pipeline measurement, prints RMS report
-npx electron . --smoke  # loads Vimeo + YouTube, verifies filter attachment
-python3 scripts/make_patches.py   # regenerate the BT.709 probe video
+npm test                    # color math + probe driver unit tests
+npm run measure             # framebuffer pipeline measurement, prints RMS
+npx electron . --smoke      # loads Vimeo + YouTube, verifies filter attachment
+npx electron . --probe-sim  # full hardware-probe flow vs scripted simulator
+python3 scripts/make_patches.py       # regenerate the BT.709 probe video
+python3 scripts/make_step_patches.py  # regenerate the probe step video
 ```
 
 ## Known limitations

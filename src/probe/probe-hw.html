@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Probe Measurement</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  video { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+  /* HUD hugs the top edge, far outside the 20% center patch field. */
+  #hud {
+    position: fixed; top: 8px; left: 0; right: 0; text-align: center;
+    font: 13px -apple-system, sans-serif; color: #777;
+    pointer-events: none; user-select: none;
+  }
+  #hud:empty { display: none; }
+</style>
+</head>
+<body>
+  <video id="v" src="assets/patch-steps-709.mp4" muted playsinline preload="auto"></video>
+  <div id="hud"></div>
+  <script>
+    // Driven from the main process via executeJavaScript:
+    //   window.kcShowSegment(n) → resolves once the seeked frame is presented
+    //   window.kcHud(text)
+    const v = document.getElementById('v');
+    const hud = document.getElementById('hud');
+    window.kcHud = (text) => { hud.textContent = text || ''; };
+    window.kcShowSegment = (segment) =>
+      new Promise((resolve) => {
+        const target = segment * 2 + 1;
+        v.pause();
+        const done = () => requestAnimationFrame(() => requestAnimationFrame(resolve));
+        if (Math.abs(v.currentTime - target) < 0.05 && v.readyState >= 2) {
+          done();
+          return;
+        }
+        v.addEventListener('seeked', done, { once: true });
+        v.currentTime = target;
+      });
+  </script>
+</body>
+</html>

@@ -20,6 +20,13 @@ import {
 import { lightProfileFromGamma, lightProfileFromPoints } from '../color/presets';
 import { currentDisplay, allDisplays, DisplayInfo } from './displays';
 import { runMeasurement } from './calibration';
+import { Spotread, findSpotread, ProbeStatus } from './spotread';
+import {
+  runProbeMeasurement,
+  parseCorrectionProfile,
+  CorrectionPoint,
+  ProbeHost,
+} from './probe-measure';
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -383,6 +390,30 @@ function wireIpc(): void {
     },
   );
 
+  ipcMain.handle('kc:probe-detect', () => probeDetect());
+  ipcMain.handle(
+    'kc:probe-run',
+    async (_e, opts: { samples?: number; correctionPath?: string | null }) => {
+      try {
+        return await runHardwareProbe(opts ?? {});
+      } catch (err) {
+        return { ok: false, error: String((err as Error).message ?? err) };
+      }
+    },
+  );
+  ipcMain.on('kc:probe-cancel', () => {
+    probeCancelled = true;
+  });
+  ipcMain.handle('kc:probe-pick-correction', async () => {
+    const { dialog } = require('electron') as typeof import('electron');
+    const res = await dialog.showOpenDialog(settingsWin ?? win!, {
+      title: 'Choose probe correction profile',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    return res.canceled ? null : res.filePaths[0];
+  });
+
   ipcMain.on('kc:set-active-profile', (_e, displayId: number, id: string) => {
     setActiveProfile(displayId, id);
     pushAllLuts();
@@ -393,6 +424,133 @@ function wireIpc(): void {
     pushAllLuts();
     broadcastState();
   });
+}
+
+// ── hardware probe (spotread) ────────────────────────────────────────────────
+
+let probeWin: BrowserWindow | null = null;
+let probeInstance: Spotread | null = null;
+let probeCancelled = false;
+
+function spotreadBinary(): string | null {
+  // --probe-sim (or env) substitutes the scripted simulator.
+  if (process.argv.includes('--probe-sim') || process.env.KC_PROBE_SIM) {
+    return path.join(__dirname, '..', '..', 'scripts', 'spotread-sim.js');
+  }
+  return findSpotread();
+}
+
+function getProbe(): Spotread | null {
+  const bin = spotreadBinary();
+  if (!bin) return null;
+  if (!probeInstance) probeInstance = new Spotread(bin);
+  return probeInstance;
+}
+
+async function probeDetect(): Promise<ProbeStatus> {
+  const probe = getProbe();
+  if (!probe) {
+    return {
+      state: 'argyll-missing',
+      message: 'ArgyllCMS not found — install via: brew install argyll',
+    };
+  }
+  return probe.detect();
+}
+
+function openProbeWindow(display: DisplayInfo): Promise<BrowserWindow> {
+  const d = screen.getAllDisplays().find((x) => x.id === display.id);
+  const w = new BrowserWindow({
+    x: d?.bounds.x ?? 0,
+    y: d?.bounds.y ?? 0,
+    width: d?.bounds.width ?? 1280,
+    height: d?.bounds.height ?? 720,
+    frame: false,
+    fullscreen: true,
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'inject.js'),
+      contextIsolation: true,
+      backgroundThrottling: false,
+    },
+  });
+  w.webContents.on('before-input-event', (_e, input) => {
+    if (input.key === 'Escape') probeCancelled = true;
+  });
+  w.on('closed', () => {
+    if (probeWin === w) probeWin = null;
+    probeCancelled = true;
+  });
+  w.loadFile(path.join(__dirname, '..', 'probe', 'probe-hw.html'));
+  return new Promise((resolve) =>
+    w.webContents.once('did-finish-load', () => resolve(w)),
+  );
+}
+
+async function runHardwareProbe(opts: {
+  samples?: number;
+  correctionPath?: string | null;
+  settleMs?: number;
+  progress?: (p: unknown) => void;
+}): Promise<unknown> {
+  const display = curDisplay();
+  if (!display) throw new Error('no display');
+  const probe = getProbe();
+  if (!probe) throw new Error('ArgyllCMS not found — brew install argyll');
+
+  let correction: CorrectionPoint[] | null = null;
+  if (opts.correctionPath) {
+    const fs = require('fs') as typeof import('fs');
+    correction = parseCorrectionProfile(
+      JSON.parse(fs.readFileSync(opts.correctionPath, 'utf8')),
+    );
+  }
+
+  probeCancelled = false;
+  probeWin = await openProbeWindow(display);
+  const w = probeWin;
+  const host: ProbeHost = {
+    showSegment: async (segment) => {
+      await w.webContents.executeJavaScript(`window.kcShowSegment(${segment})`);
+    },
+    hud: async (text) => {
+      await w.webContents.executeJavaScript(
+        `window.kcHud(${JSON.stringify(text)})`,
+      );
+    },
+    sendLut: (values) => w.webContents.send('kc:lut', values),
+    onProgress: (p) => {
+      opts.progress?.(p);
+      settingsWin?.webContents.send('kc:probe-progress', p);
+    },
+    isCancelled: () => probeCancelled,
+    display: { id: display.id, label: display.label },
+  };
+
+  try {
+    const result = await runProbeMeasurement(host, probe, {
+      samplesPerPatch: opts.samples ?? 3,
+      correction,
+      settleMs: opts.settleMs,
+    });
+    addProfileForDisplay(display.id, result.profile);
+    pushAllLuts();
+    broadcastState();
+    return {
+      ok: true,
+      fittedGamma: result.fittedGamma,
+      driftPct: result.driftPct,
+      driftValid: result.driftValid,
+      verify: result.verify,
+      readings: result.readings,
+      profileLabel: result.profile.label,
+    };
+  } finally {
+    probe.dispose();
+    probeInstance = null;
+    if (probeWin && !probeWin.isDestroyed()) probeWin.close();
+    probeWin = null;
+  }
 }
 
 function openSettingsWindow(): void {
@@ -611,6 +769,25 @@ app.whenReady().then(async () => {
     );
     } catch (err) {
       console.log('KC_UI ' + JSON.stringify({ error: String(err) }));
+      process.exitCode = 1;
+    }
+    app.quit();
+  } else if (process.argv.includes('--probe-sim')) {
+    // End-to-end hardware-probe flow against the scripted spotread simulator:
+    // detect → fullscreen patch window → 12 reads → drift gate → light profile
+    // → physical verify pass. Proves the whole pipeline without an instrument.
+    try {
+      const status = await probeDetect();
+      console.log('KC_PROBE_DETECT ' + JSON.stringify(status));
+      if (status.state !== 'ready') throw new Error(status.state);
+      const result = await runHardwareProbe({
+        samples: 1,
+        settleMs: 50,
+        progress: (p) => console.log('KC_PROBE_PROGRESS ' + JSON.stringify(p)),
+      });
+      console.log('KC_PROBE_RESULT ' + JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.error('KC_PROBE_FAILED', err);
       process.exitCode = 1;
     }
     app.quit();
