@@ -11,7 +11,8 @@
     "measure": "npm run build && electron . --measure",
     "test": "tsc -p tsconfig.json && node --test dist/test/",
     "package": "npm run build && electron-packager . \"Kootenay Browser\" --platform=darwin --arch=arm64 --out=out --overwrite --app-bundle-id=com.kootenay.browser --icon=build/icon --ignore=\"^/(src|scripts|out|\\.git|node_modules/\\.cache|test)\"",
-    "install-app": "npm run package && rm -rf \"/Applications/Kootenay Browser.app\" && cp -R \"out/Kootenay Browser-darwin-arm64/Kootenay Browser.app\" /Applications/ && echo \"Installed to /Applications/Kootenay Browser.app\""
+    "install-app": "npm run package && rm -rf \"/Applications/Kootenay Browser.app\" && cp -R \"out/Kootenay Browser-darwin-arm64/Kootenay Browser.app\" /Applications/ && echo \"Installed to /Applications/Kootenay Browser.app\"",
+    "dmg": "bash scripts/make_dmg.sh"
   },
   "license": "MIT",
   "devDependencies": {

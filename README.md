@@ -36,6 +36,23 @@ remembered per domain. Type `probe` in the URL bar for the test-patch page;
 "Calibrate this display…" in the popover re-measures the pipeline and bakes a
 machine profile (`userData/calibration.json`).
 
+## Install
+
+- **From the DMG** (`npm run dmg` → `out/Kootenay-Browser.dmg`): open it, drag
+  **Kootenay Browser** onto **Applications**. Universal binary — runs on both
+  Apple Silicon and Intel Macs. Electron is bundled; the browser and all
+  color-correction features (Simple, Measured via screen probe or imported
+  data) need **no external dependencies**.
+- First launch on another Mac: it's ad-hoc signed, not Apple-notarized, so
+  Gatekeeper will ask — **right-click the app → Open** once (or run
+  `xattr -cr "/Applications/Kootenay Browser.app"`). After that it opens
+  normally.
+- Dev install to /Applications without a DMG: `npm run install-app`.
+
+The **only** feature needing an external dependency is the optional i1 hardware
+probe, which uses ArgyllCMS (`brew install argyll`). Everything else is
+self-contained.
+
 ## Hardware probe (i1 Display Pro Plus)
 
 Color Settings → current display → **Measure with hardware probe…** Requires

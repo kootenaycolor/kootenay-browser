@@ -104,7 +104,14 @@ export class Spotread {
     return this.proc;
   }
 
-  /** Start (or reuse) the process and classify readiness. */
+  /**
+   * Start (or reuse) the process and classify readiness. Requires POSITIVE
+   * confirmation that an instrument opened — spotread only prints its
+   * "place instrument / read" prompt (or an Instrument Type line) once the
+   * device is actually connected and initialized. Absence of a ready signal
+   * (or any error / early exit) means no probe. This avoids the false
+   * "ready" that a bare `spotread -v` produces while it waits for hardware.
+   */
   async detect(): Promise<ProbeStatus> {
     if (!fs.existsSync(this.binary)) {
       return {
@@ -112,22 +119,50 @@ export class Spotread {
         message: 'ArgyllCMS not found — install via: brew install argyll',
       };
     }
+
+    const READY = [
+      /Place instrument on/i,
+      /hit \[?CR\]?/i,
+      /Setting up the instrument/i,
+      /Serial Number/i,
+      /Instrument Type:/i,
+    ];
+    const ERROR = [
+      /No instruments? found/i,
+      /No suitable instrument/i,
+      /Failed to (open|access|initialise|initialize)/i,
+      /instrument access failed/i,
+      /not connect/i,
+      /Diagnostic:/i,
+      /Error -/i,
+    ];
+
     const proc = this.ensureProc();
-    await new Promise((r) => setTimeout(r, DETECT_SETTLE_MS));
-    const out = this.allOutput;
-    if (
-      proc.exitCode !== null ||
-      /No suitable/i.test(out) ||
-      /no instrument/i.test(out)
-    ) {
-      this.dispose();
-      return {
-        state: 'no-probe',
-        message: 'No probe detected — connect i1 Display Pro Plus and retry',
-      };
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 150));
+      const out = this.allOutput;
+      if (proc.exitCode !== null || ERROR.some((re) => re.test(out))) {
+        this.dispose();
+        return {
+          state: 'no-probe',
+          message: 'No probe detected — connect the colorimeter and retry',
+        };
+      }
+      if (READY.some((re) => re.test(out))) {
+        const m = /Instrument Type:?\s*(.+)/i.exec(out);
+        return {
+          state: 'ready',
+          device: m?.[1]?.trim() || 'colorimeter',
+        };
+      }
     }
-    const m = /Instrument Type:?\s*(.+)/i.exec(out);
-    return { state: 'ready', device: m?.[1]?.trim() || 'i1 Display Pro Plus' };
+    // No positive confirmation within the window → treat as not connected.
+    this.dispose();
+    return {
+      state: 'no-probe',
+      message: 'No probe detected — connect the colorimeter and retry',
+    };
   }
 
   /** One trigger → one XYZ sample. */

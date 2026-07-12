@@ -4,3 +4,6 @@ dist/
 .DS_Store
 build/icon.iconset/
 build/icon-1024.png
+
+out/
+build/dmg-stage/
