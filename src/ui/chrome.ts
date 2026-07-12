@@ -55,7 +55,19 @@ function render(): void {
       e.stopPropagation();
       kc.send('kc:close-tab', t.id);
     };
-    el.append(dot, lead, title, close);
+    el.append(dot, lead, title);
+    if (t.audible || t.muted) {
+      const audio = document.createElement('button');
+      audio.className = 'audio';
+      audio.textContent = t.muted ? '🔇' : '🔊';
+      audio.title = t.muted ? 'Unmute tab' : 'Mute tab';
+      audio.onclick = (e) => {
+        e.stopPropagation();
+        kc.send('kc:toggle-mute', t.id);
+      };
+      el.append(audio);
+    }
+    el.append(close);
     el.onclick = () => kc.send('kc:select-tab', t.id);
     el.onauxclick = (e) => {
       if ((e as MouseEvent).button === 1) kc.send('kc:close-tab', t.id);
@@ -92,6 +104,18 @@ function render(): void {
   star.textContent = state.currentBookmarked ? '★' : '☆';
   star.classList.toggle('on', state.currentBookmarked);
   $('progress').classList.toggle('on', !!tab?.loading);
+
+  const lock = $('lock');
+  const editing = document.activeElement === urlbar;
+  if (state.security === 'internal' || !tab || editing) {
+    lock.className = 'hidden';
+    urlbar.classList.add('nolock');
+  } else {
+    lock.className = state.security === 'secure' ? '' : 'insecure';
+    lock.textContent = state.security === 'secure' ? '🔒' : '⚠';
+    lock.title = state.security === 'secure' ? 'Secure (HTTPS)' : 'Not secure (HTTP)';
+    urlbar.classList.remove('nolock');
+  }
 
   renderBookmarksBar();
 }

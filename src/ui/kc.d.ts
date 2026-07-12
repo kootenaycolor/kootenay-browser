@@ -13,6 +13,8 @@ interface KcTabState {
   method: KcMethod;
   source: string;
   loading: boolean;
+  audible: boolean;
+  muted: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -39,6 +41,7 @@ interface KcState {
   bookmarks: KcBookmark[];
   bookmarksBarVisible: boolean;
   currentBookmarked: boolean;
+  security: 'secure' | 'insecure' | 'internal';
 }
 
 interface KcProfile {

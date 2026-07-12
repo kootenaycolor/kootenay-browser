@@ -133,6 +133,8 @@ interface Tab {
   method: Method;
   source: TransferId;
   favicon?: string;
+  audible?: boolean;
+  muted?: boolean;
 }
 
 let win: BrowserWindow | null = null;
@@ -209,6 +211,8 @@ function buildState() {
       method: t.method,
       source: t.source,
       loading: t.view.webContents.isLoading(),
+      audible: !!t.audible,
+      muted: !!t.muted,
       canGoBack: t.view.webContents.navigationHistory.canGoBack(),
       canGoForward: t.view.webContents.navigationHistory.canGoForward(),
     })),
@@ -225,7 +229,14 @@ function buildState() {
       active && /^https?:/.test(active.view.webContents.getURL())
         ? isBookmarked(active.view.webContents.getURL())
         : false,
+    security: securityOf(active?.view.webContents.getURL() ?? ''),
   };
+}
+
+function securityOf(url: string): 'secure' | 'insecure' | 'internal' {
+  if (/^https:/.test(url)) return 'secure';
+  if (/^http:/.test(url)) return 'insecure';
+  return 'internal';
 }
 
 function broadcastState(): void {
@@ -408,6 +419,11 @@ function createTab(
   });
   wc.on('did-start-loading', broadcastState);
   wc.on('did-stop-loading', broadcastState);
+  wc.on('audio-state-changed', (evt) => {
+    tab.audible = (evt as unknown as { audible: boolean }).audible;
+    broadcastState();
+  });
+  wc.on('update-target-url', (_e, url) => win?.webContents.send('kc:hover-url', url));
   wc.on('did-navigate', () => {
     // Apply the per-domain default when entering a new site.
     try {
@@ -675,6 +691,13 @@ function wireIpc(): void {
   ipcMain.on('kc:new-tab', () => void createTab(NEWTAB_URL));
   ipcMain.on('kc:close-tab', (_e, id: number) => closeTab(id));
   ipcMain.on('kc:select-tab', (_e, id: number) => showTab(id));
+  ipcMain.on('kc:toggle-mute', (_e, id: number) => {
+    const t = tabs.find((x) => x.id === id);
+    if (!t) return;
+    t.muted = !t.muted;
+    t.view.webContents.setAudioMuted(t.muted);
+    broadcastState();
+  });
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
   ipcMain.on('kc:toggle-popover', () => setPopoverOpen(!popoverOpen));
   ipcMain.on('kc:close-popover', () => setPopoverOpen(false));
@@ -1086,6 +1109,26 @@ interface DownloadRec {
 }
 const downloads: DownloadRec[] = [];
 
+function setupSecurity(): void {
+  // Electron grants every permission by default. Deny the sensitive ones
+  // outright (a review browser never needs them), allow only what playback
+  // and normal browsing require.
+  const ALLOWED = new Set([
+    'fullscreen',
+    'pointerLock',
+    'clipboard-sanitized-write',
+  ]);
+  const handler = (
+    _wc: unknown,
+    permission: string,
+    cb: (granted: boolean) => void,
+  ) => cb(ALLOWED.has(permission));
+  session.defaultSession.setPermissionRequestHandler(handler as never);
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission) => ALLOWED.has(permission),
+  );
+}
+
 function setupDownloads(): void {
   session.defaultSession.on('will-download', (_e, item) => {
     const rec: DownloadRec = {
@@ -1169,6 +1212,7 @@ function restoreOrHome(): void {
 
 app.whenReady().then(async () => {
   registerInternalProtocol();
+  setupSecurity();
   wireIpc();
   setupDownloads();
   installAppMenu();

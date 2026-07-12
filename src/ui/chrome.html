@@ -55,6 +55,11 @@
   .tab .close:hover { background: var(--border); color: var(--text); }
   .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; display: none; }
   .tab.managed .dot { display: block; }
+  .tab .audio {
+    flex: none; border: none; background: transparent; cursor: pointer;
+    font-size: 11px; padding: 0 2px; color: var(--text-secondary); line-height: 1;
+  }
+  .tab .audio:hover { color: var(--text); }
   #newtab {
     -webkit-app-region: no-drag;
     width: 26px; height: 26px; margin-bottom: 2px;
@@ -83,6 +88,12 @@
   .navbtn:disabled { opacity: 0.35; }
 
   #urlwrap { flex: 1; position: relative; display: flex; align-items: center; }
+  #lock {
+    position: absolute; left: 11px; font-size: 12px; pointer-events: none;
+    color: var(--text-secondary);
+  }
+  #lock.insecure { color: #d9a441; }
+  #lock.hidden { display: none; }
   #urlbar {
     flex: 1;
     height: 32px;
@@ -90,12 +101,13 @@
     border-radius: var(--radius);
     background: var(--bg-raised);
     color: var(--text);
-    padding: 0 38px 0 14px;
+    padding: 0 38px 0 30px;
     font-family: var(--font);
     font-size: 13px;
     outline: none;
     user-select: text;
   }
+  #urlbar.nolock { padding-left: 14px; }
   #urlbar:focus { border-color: var(--border-strong); }
   #star {
     position: absolute; right: 8px;
@@ -196,6 +208,7 @@
       <button class="navbtn" id="reload" title="Reload (⌘R)">⟳</button>
       <button class="navbtn" id="home" title="Home (⌘⇧H)">⌂</button>
       <div id="urlwrap">
+        <span id="lock" class="hidden">🔒</span>
         <input id="urlbar" spellcheck="false" placeholder="Search or enter address — or 'probe' for the calibration page">
         <button id="star" title="Bookmark (⌘D)">☆</button>
       </div>
