@@ -52,6 +52,7 @@ interface StoreShape {
   homePage: string;
   bookmarks: Bookmark[];
   bookmarksBarVisible: boolean;
+  zoomByHost: Record<string, number>;
   lastSession?: SavedSession;
   windowBounds?: SavedBounds;
 }
@@ -79,6 +80,7 @@ function store(): StoreShape {
     cache.homePage ??= 'https://vimeo.com';
     cache.bookmarks ??= [];
     cache.bookmarksBarVisible ??= true;
+    cache.zoomByHost ??= {};
   }
   return cache;
 }
@@ -169,6 +171,17 @@ export function saveWindowBounds(bounds: SavedBounds): void {
 
 export function windowBounds(): SavedBounds | undefined {
   return store().windowBounds;
+}
+
+export function zoomForHost(host: string): number {
+  return store().zoomByHost[normalizeHost(host)] ?? 1;
+}
+
+export function setZoomForHost(host: string, factor: number): void {
+  const h = normalizeHost(host);
+  if (Math.abs(factor - 1) < 0.001) delete store().zoomByHost[h];
+  else store().zoomByHost[h] = factor;
+  persist();
 }
 
 // ── per-display measured profiles ───────────────────────────────────────────

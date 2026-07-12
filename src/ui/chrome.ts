@@ -72,6 +72,10 @@ function render(): void {
     el.onauxclick = (e) => {
       if ((e as MouseEvent).button === 1) kc.send('kc:close-tab', t.id);
     };
+    el.oncontextmenu = (e) => {
+      e.preventDefault();
+      kc.send('kc:tab-context', t.id);
+    };
     tabsEl.appendChild(el);
   }
 

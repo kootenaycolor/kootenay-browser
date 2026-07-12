@@ -45,6 +45,8 @@ import {
   lastSession,
   saveWindowBounds,
   windowBounds,
+  zoomForHost,
+  setZoomForHost,
 } from './settings';
 import {
   recordVisit,
@@ -446,6 +448,11 @@ function createTab(
       /* non-http urls */
     }
     recordVisit(wc.getURL(), wc.getTitle());
+    try {
+      wc.setZoomFactor(zoomForHost(new URL(wc.getURL()).hostname));
+    } catch {
+      /* non-http */
+    }
     pushLut(tab);
     broadcastState();
     scheduleSessionSave();
@@ -631,10 +638,31 @@ function zoom(dir: 'in' | 'out' | 'reset'): void {
         ? Math.min(3, cur + 0.1)
         : Math.max(0.3, cur - 0.1);
   wc.setZoomFactor(next);
+  try {
+    setZoomForHost(new URL(wc.getURL()).hostname, next);
+  } catch {
+    /* non-http */
+  }
+}
+
+function duplicateTab(id: number): void {
+  const t = tabs.find((x) => x.id === id);
+  if (t) createTab(t.view.webContents.getURL(), { method: t.method, source: t.source });
+}
+
+function closeOtherTabs(id: number): void {
+  for (const t of [...tabs]) if (t.id !== id) closeTab(t.id);
+}
+
+function closeTabsToRight(id: number): void {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx === -1) return;
+  for (const t of tabs.slice(idx + 1)) closeTab(t.id);
 }
 
 function selectTabByIndex(i: number): void {
-  if (tabs[i]) showTab(tabs[i].id);
+  const t = i < 0 ? tabs[tabs.length - 1] : tabs[i];
+  if (t) showTab(t.id);
 }
 
 function cycleTab(delta: number): void {
@@ -707,6 +735,36 @@ function wireIpc(): void {
     t.muted = !t.muted;
     t.view.webContents.setAudioMuted(t.muted);
     broadcastState();
+  });
+  ipcMain.on('kc:tab-context', (_e, id: number) => {
+    const t = tabs.find((x) => x.id === id);
+    if (!t || !win) return;
+    Menu.buildFromTemplate([
+      { label: 'New Tab', click: () => void createTab(NEWTAB_URL) },
+      { label: 'Duplicate Tab', click: () => duplicateTab(id) },
+      {
+        label: t.muted ? 'Unmute Tab' : 'Mute Tab',
+        click: () => {
+          t.muted = !t.muted;
+          t.view.webContents.setAudioMuted(t.muted);
+          broadcastState();
+        },
+      },
+      { type: 'separator' },
+      { label: 'Reopen Closed Tab', click: reopenClosedTab },
+      { type: 'separator' },
+      { label: 'Close Tab', click: () => closeTab(id) },
+      {
+        label: 'Close Other Tabs',
+        enabled: tabs.length > 1,
+        click: () => closeOtherTabs(id),
+      },
+      {
+        label: 'Close Tabs to the Right',
+        enabled: tabs.findIndex((x) => x.id === id) < tabs.length - 1,
+        click: () => closeTabsToRight(id),
+      },
+    ]).popup({ window: win });
   });
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
   ipcMain.on('kc:toggle-popover', () => setPopoverOpen(!popoverOpen));

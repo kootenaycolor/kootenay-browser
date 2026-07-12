@@ -40,7 +40,8 @@ export function installMenu(a: MenuActions): void {
       accelerator: `Cmd+${i + 1}`,
       visible: false,
       acceleratorWorksWhenHidden: true,
-      click: () => a.selectTab(i),
+      // Cmd+9 = last tab (browser convention), 1–8 = that index.
+      click: () => a.selectTab(i === 8 ? -1 : i),
     }),
   );
 
