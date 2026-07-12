@@ -1,0 +1,49 @@
+/* Design tokens — single source of truth for chrome, popover, probe page.
+   Feel: Claude desktop app. Calm, minimal, professionally focused.
+   Warm neutrals, one restrained accent, dark mode is first-class. */
+
+:root {
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, monospace;
+
+  /* light */
+  --bg: #faf9f5;
+  --bg-raised: #ffffff;
+  --bg-inset: #f0eee8;
+  --border: #e3e0d8;
+  --border-strong: #cfccc2;
+  --text: #3d3a33;
+  --text-secondary: #8a8578;
+  --accent: #c96442;
+  --accent-soft: #c9644226;
+  --shadow: 0 4px 24px rgba(60, 55, 45, 0.12);
+  --radius: 10px;
+  --radius-sm: 7px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262624;
+    --bg-raised: #30302e;
+    --bg-inset: #1f1e1b;
+    --border: #3e3d3a;
+    --border-strong: #52504b;
+    --text: #e8e6e0;
+    --text-secondary: #97948c;
+    --accent: #d97757;
+    --accent-soft: #d9775733;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}

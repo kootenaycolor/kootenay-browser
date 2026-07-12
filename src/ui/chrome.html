@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+
+  #chrome {
+    height: 84px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── tab strip ─────────────────────────────────────────── */
+  #tabstrip {
+    height: 38px;
+    display: flex;
+    align-items: flex-end;
+    padding: 0 8px 0 84px; /* room for traffic lights */
+    gap: 4px;
+    -webkit-app-region: drag;
+  }
+  .tab {
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    max-width: 200px;
+    min-width: 90px;
+    padding: 0 10px 0 12px;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    color: var(--text-secondary);
+    background: transparent;
+    font-size: 12px;
+    cursor: default;
+    overflow: hidden;
+  }
+  .tab.active { background: var(--bg-inset); color: var(--text); }
+  .tab .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tab .close {
+    width: 16px; height: 16px; border-radius: 4px; border: none;
+    background: transparent; color: var(--text-secondary);
+    font-size: 12px; line-height: 1; cursor: pointer; padding: 0;
+  }
+  .tab .close:hover { background: var(--border); color: var(--text); }
+  .tab .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); flex: none; display: none;
+  }
+  .tab.managed .dot { display: block; }
+  #newtab {
+    -webkit-app-region: no-drag;
+    width: 26px; height: 26px; margin-bottom: 2px;
+    border: none; border-radius: var(--radius-sm);
+    background: transparent; color: var(--text-secondary);
+    font-size: 16px; cursor: pointer;
+  }
+  #newtab:hover { background: var(--bg-inset); color: var(--text); }
+
+  /* ── toolbar ───────────────────────────────────────────── */
+  #toolbar {
+    height: 46px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    background: var(--bg-inset);
+  }
+  .navbtn {
+    width: 30px; height: 30px; border: none; border-radius: var(--radius-sm);
+    background: transparent; color: var(--text-secondary);
+    font-size: 15px; cursor: pointer;
+  }
+  .navbtn:hover:not(:disabled) { background: var(--bg-raised); color: var(--text); }
+  .navbtn:disabled { opacity: 0.35; }
+
+  #urlbar {
+    flex: 1;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+    color: var(--text);
+    padding: 0 14px;
+    font-family: var(--font);
+    font-size: 13px;
+    outline: none;
+    user-select: text;
+  }
+  #urlbar:focus { border-color: var(--border-strong); }
+
+  /* pipeline button + badge */
+  #pipebtn {
+    display: flex; align-items: center; gap: 7px;
+    height: 32px; padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+    color: var(--text-secondary);
+    font-family: var(--font); font-size: 12px;
+    cursor: pointer;
+  }
+  #pipebtn:hover { border-color: var(--border-strong); color: var(--text); }
+  #pipebtn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  #pipebtn .swatch { font-size: 13px; }
+
+  /* ── popover ───────────────────────────────────────────── */
+  #popover {
+    position: fixed;
+    top: 88px; right: 12px;
+    width: 300px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 16px;
+    z-index: 10;
+    display: none;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  #popover.open { display: block; opacity: 1; }
+  #popover h3 {
+    margin: 0 0 2px; font-size: 13px; font-weight: 600;
+  }
+  #popover .sub {
+    margin: 0 0 14px; font-size: 11.5px; color: var(--text-secondary);
+    line-height: 1.45;
+  }
+  .field { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .field label { font-size: 12.5px; color: var(--text-secondary); }
+  .field select {
+    -webkit-appearance: none;
+    font-family: var(--font); font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 5px 24px 5px 10px;
+    outline: none; cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0l4 5 4-5z' fill='%23999'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+  #pipeline-note {
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text-secondary); line-height: 1.5;
+  }
+  #pipeline-note .cal { color: var(--accent); cursor: pointer; }
+  #calresult { margin-top: 8px; font-family: var(--font-mono); font-size: 10.5px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div id="chrome">
+    <div id="tabstrip">
+      <div id="tabs" style="display:flex;gap:4px;align-items:flex-end;"></div>
+      <button id="newtab" title="New tab">+</button>
+    </div>
+    <div id="toolbar">
+      <button class="navbtn" id="back" title="Back">‹</button>
+      <button class="navbtn" id="forward" title="Forward">›</button>
+      <button class="navbtn" id="reload" title="Reload">⟳</button>
+      <input id="urlbar" spellcheck="false" placeholder="Enter URL — or 'probe' for the calibration page">
+      <button id="pipebtn" title="Color pipeline">
+        <span class="swatch">◇</span><span id="pipelabel">Color: Off</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="popover">
+    <h3>Color Pipeline</h3>
+    <p class="sub">Declare how this file was graded. The browser offsets what
+    the platform and macOS do to it, so you see the intended image.</p>
+    <div class="field">
+      <label>Management</label>
+      <select id="mode">
+        <option value="off">Off</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Source Gamma</label>
+      <select id="gamma"></select>
+    </div>
+    <div id="pipeline-note">
+      Pipeline: <span id="pipeprofile"></span><br>
+      <span class="cal" id="calibrate">Calibrate this display…</span>
+      <div id="calresult"></div>
+    </div>
+  </div>
+
+  <script src="chrome.js"></script>
+</body>
+</html>

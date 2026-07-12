@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pipeline Probe</title>
+<style>
+  /* Video geometry is load-bearing: calibration samples fixed coordinates.
+     640×360 CSS = 1280×720 device px on retina = 1:1 with source pixels. */
+  html, body { margin: 0; background: #101010; color: #cfccc2;
+    font: 13px -apple-system, sans-serif; }
+  #v { position: absolute; top: 0; left: 0; width: 640px; height: 360px;
+    display: block; }
+  #info { position: absolute; top: 0; left: 660px; max-width: 460px; padding: 12px 8px; }
+  table { border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+  td, th { border: 1px solid #333; padding: 4px 10px; text-align: right;
+    font-variant-numeric: tabular-nums; }
+  th { color: #97948c; font-weight: 500; }
+  h1 { font-size: 15px; margin: 4px 0 8px; }
+  p { line-height: 1.5; color: #97948c; }
+  code { color: #d97757; }
+</style>
+</head>
+<body>
+  <video id="v" src="assets/patches-709.mp4" muted autoplay loop playsinline></video>
+  <div id="info">
+    <h1>Pipeline Probe</h1>
+    <p>BT.709-tagged H.264, authored patch values below. Read the patches with
+    Digital&nbsp;Color&nbsp;Meter (display native values), or use
+    <em>Calibrate this display</em> in the pipeline popover to measure
+    automatically.</p>
+    <table>
+      <tr><th>Patch</th><th>Authored</th><th>Target (2.4 grade)</th></tr>
+      <tr><td>Black</td><td>0</td><td>0</td></tr>
+      <tr><td>30%</td><td>51</td><td>40</td></tr>
+      <tr><td>60%</td><td>153</td><td>147</td></tr>
+      <tr><td>75%</td><td>191</td><td>188</td></tr>
+      <tr><td>White</td><td>255</td><td>255</td></tr>
+    </table>
+    <p>Targets are the sRGB display values that reproduce the mastering
+    luminance of a Gamma 2.4 grade (white paper Method B). Bottom strip is a
+    0–255 gradient used to sample the full transfer curve.</p>
+  </div>
+</body>
+</html>
