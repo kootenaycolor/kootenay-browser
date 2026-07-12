@@ -1,5 +1,19 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  WebContentsView,
+  ipcMain,
+  screen,
+  Menu,
+  MenuItemConstructorOptions,
+  Notification,
+  clipboard,
+  shell,
+  session,
+  dialog,
+} from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { TransferId, SOURCE_PRESETS } from '../color/transfer';
 import { LUT_TAPS, buildCorrectionLut, lutToTableValues } from '../color/lut';
 import {
@@ -16,7 +30,21 @@ import {
   deleteProfile,
   resolveProfile,
   normalizeHost,
+  homePage,
+  setHomePage,
+  bookmarks,
+  isBookmarked,
+  addBookmark,
+  removeBookmark,
+  bookmarksBarVisible,
+  setBookmarksBarVisible,
+  saveSession,
+  lastSession,
+  saveWindowBounds,
+  windowBounds,
 } from './settings';
+import { recordVisit, updateTitle, searchHistory, clearHistory } from './history';
+import { installMenu } from './menu';
 import { lightProfileFromGamma, lightProfileFromPoints } from '../color/presets';
 import { currentDisplay, allDisplays, DisplayInfo } from './displays';
 import { runMeasurement } from './calibration';
@@ -40,14 +68,28 @@ app.whenReady().then(() => {
 });
 
 const TOOLBAR_H = 84;
-const HOME_URL = 'https://vimeo.com';
+const BOOKMARKS_BAR_H = 32;
+const FINDBAR_H = 38;
 const DEFAULT_SOURCE: TransferId = 'gamma24';
+
+let findBarVisible = false;
+let htmlFullscreen = false;
+
+function chromeHeight(): number {
+  if (htmlFullscreen) return 0;
+  return (
+    TOOLBAR_H +
+    (bookmarksBarVisible() ? BOOKMARKS_BAR_H : 0) +
+    (findBarVisible ? FINDBAR_H : 0)
+  );
+}
 
 interface Tab {
   id: number;
   view: WebContentsView;
   method: Method;
   source: TransferId;
+  favicon?: string;
 }
 
 let win: BrowserWindow | null = null;
@@ -120,8 +162,10 @@ function buildState() {
       id: t.id,
       title: t.view.webContents.getTitle() || 'New Tab',
       url: t.view.webContents.getURL(),
+      favicon: t.favicon,
       method: t.method,
       source: t.source,
+      loading: t.view.webContents.isLoading(),
       canGoBack: t.view.webContents.navigationHistory.canGoBack(),
       canGoForward: t.view.webContents.navigationHistory.canGoForward(),
     })),
@@ -132,6 +176,12 @@ function buildState() {
     activeProfile: resolved
       ? { label: resolved.profile.label, kind: resolved.profile.kind, fellBack: resolved.fellBack }
       : null,
+    bookmarks: bookmarks(),
+    bookmarksBarVisible: bookmarksBarVisible(),
+    currentBookmarked:
+      active && /^https?:/.test(active.view.webContents.getURL())
+        ? isBookmarked(active.view.webContents.getURL())
+        : false,
   };
 }
 
@@ -184,7 +234,49 @@ function ensurePopoverView(): void {
 function layoutPopover(): void {
   if (!win || !popoverView) return;
   const [w, h] = win.getContentSize();
-  popoverView.setBounds({ x: 0, y: TOOLBAR_H, width: w, height: h - TOOLBAR_H });
+  const ch = chromeHeight();
+  popoverView.setBounds({ x: 0, y: ch, width: w, height: h - ch });
+}
+
+// ── URL suggestions overlay (topmost, avoids tab-view occlusion) ─────────────
+
+let suggestView: WebContentsView | null = null;
+
+function ensureSuggestView(): void {
+  if (suggestView || !win) return;
+  suggestView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'ui-bridge.js'),
+      contextIsolation: true,
+    },
+  });
+  suggestView.setBackgroundColor('#00000000');
+  suggestView.setVisible(false);
+  win.contentView.addChildView(suggestView);
+  suggestView.webContents.loadFile(
+    path.join(__dirname, '..', 'ui', 'suggest.html'),
+  );
+}
+
+function showSuggest(rows: { url: string; title: string }[]): void {
+  ensureSuggestView();
+  if (!suggestView || !win) return;
+  if (rows.length === 0) {
+    suggestView.setVisible(false);
+    return;
+  }
+  const [w] = win.getContentSize();
+  const rowH = 34;
+  const height = Math.min(rows.length, 6) * rowH + 8;
+  suggestView.setBounds({ x: 148, y: 82, width: w - 148 - 176, height });
+  win.contentView.removeChildView(suggestView);
+  win.contentView.addChildView(suggestView);
+  suggestView.setVisible(true);
+  suggestView.webContents.send('kc:suggest-rows', rows);
+}
+
+function hideSuggest(): void {
+  suggestView?.setVisible(false);
 }
 
 /** Keep the popover topmost after tab views are (re)added. */
@@ -211,14 +303,20 @@ function setPopoverOpen(open: boolean): void {
 function layoutTabs(): void {
   if (!win) return;
   const [w, h] = win.getContentSize();
+  const ch = chromeHeight();
   for (const t of tabs) {
-    t.view.setBounds({ x: 0, y: TOOLBAR_H, width: w, height: h - TOOLBAR_H });
+    t.view.setBounds({ x: 0, y: ch, width: w, height: h - ch });
   }
   layoutPopover();
+  win.webContents.send('kc:chrome-layout', {
+    bookmarksBar: bookmarksBarVisible() && !htmlFullscreen,
+    findBar: findBarVisible && !htmlFullscreen,
+  });
 }
 
 function showTab(id: number): void {
   if (!win) return;
+  hideSuggest();
   activeTabId = id;
   for (const t of tabs) t.view.setVisible(t.id === id);
   layoutTabs();
@@ -249,11 +347,24 @@ function createTab(
 
   const wc = view.webContents;
   wc.setWindowOpenHandler(({ url: target }) => {
+    if (!/^https?:|^file:/.test(target)) {
+      shell.openExternal(target); // mailto:, ftp:, custom schemes
+      return { action: 'deny' };
+    }
     const t = createTab(target);
     showTab(t.id);
     return { action: 'deny' };
   });
-  wc.on('page-title-updated', broadcastState);
+  wc.on('page-title-updated', (_e, title) => {
+    updateTitle(wc.getURL(), title);
+    broadcastState();
+  });
+  wc.on('page-favicon-updated', (_e, favicons) => {
+    tab.favicon = favicons[0];
+    broadcastState();
+  });
+  wc.on('did-start-loading', broadcastState);
+  wc.on('did-stop-loading', broadcastState);
   wc.on('did-navigate', () => {
     // Apply the per-domain default when entering a new site.
     try {
@@ -266,16 +377,201 @@ function createTab(
     } catch {
       /* non-http urls */
     }
+    recordVisit(wc.getURL(), wc.getTitle());
     pushLut(tab);
     broadcastState();
+    scheduleSessionSave();
   });
-  wc.on('did-navigate-in-page', broadcastState);
+  wc.on('did-navigate-in-page', () => {
+    recordVisit(wc.getURL(), wc.getTitle());
+    broadcastState();
+    scheduleSessionSave();
+  });
   // Re-send the LUT whenever any frame (players live in iframes) loads.
   wc.on('did-frame-finish-load', () => pushLut(tab));
+
+  // Simple styled error page (skip -3 = aborted, e.g. user navigated away).
+  wc.on('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
+    if (!isMainFrame || code === -3 || code === 0) return;
+    const errUrl =
+      'file://' +
+      path.join(__dirname, '..', 'ui', 'error.html') +
+      `?url=${encodeURIComponent(failedUrl)}&desc=${encodeURIComponent(desc)}`;
+    wc.loadURL(errUrl);
+  });
+
+  // HTML fullscreen (video players): give the view the whole window.
+  wc.on('enter-html-full-screen', () => {
+    htmlFullscreen = true;
+    layoutTabs();
+  });
+  wc.on('leave-html-full-screen', () => {
+    htmlFullscreen = false;
+    layoutTabs();
+  });
+
+  wc.on('found-in-page', (_e, result) => {
+    win?.webContents.send('kc:find-result', {
+      matches: result.matches,
+      active: result.activeMatchOrdinal,
+    });
+  });
+
+  attachContextMenu(tab);
 
   wc.loadURL(url);
   showTab(tab.id);
   return tab;
+}
+
+// ── context menu ─────────────────────────────────────────────────────────────
+
+function attachContextMenu(tab: Tab): void {
+  const wc = tab.view.webContents;
+  wc.on('context-menu', (_e, params) => {
+    const items: MenuItemConstructorOptions[] = [];
+    if (params.linkURL) {
+      items.push(
+        {
+          label: 'Open Link in New Tab',
+          click: () => void createTab(params.linkURL),
+        },
+        {
+          label: 'Copy Link',
+          click: () => clipboard.writeText(params.linkURL),
+        },
+        { type: 'separator' },
+      );
+    }
+    if (params.hasImageContents && params.srcURL) {
+      items.push(
+        { label: 'Copy Image', click: () => wc.copyImageAt(params.x, params.y) },
+        {
+          label: 'Copy Image Address',
+          click: () => clipboard.writeText(params.srcURL),
+        },
+        {
+          label: 'Save Image As…',
+          click: () => wc.downloadURL(params.srcURL),
+        },
+        { type: 'separator' },
+      );
+    }
+    if (params.selectionText) {
+      items.push(
+        { role: 'copy' },
+        {
+          label: `Search for “${params.selectionText.slice(0, 30)}…”`,
+          click: () =>
+            void createTab(
+              'https://www.google.com/search?q=' +
+                encodeURIComponent(params.selectionText),
+            ),
+        },
+        { type: 'separator' },
+      );
+    }
+    if (params.isEditable) {
+      items.push(
+        { role: 'undo' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { type: 'separator' },
+      );
+    }
+    items.push(
+      {
+        label: 'Back',
+        enabled: wc.navigationHistory.canGoBack(),
+        click: () => wc.navigationHistory.goBack(),
+      },
+      {
+        label: 'Forward',
+        enabled: wc.navigationHistory.canGoForward(),
+        click: () => wc.navigationHistory.goForward(),
+      },
+      { label: 'Reload', click: () => wc.reload() },
+      { type: 'separator' },
+      {
+        label: 'Inspect Element',
+        click: () => {
+          wc.inspectElement(params.x, params.y);
+        },
+      },
+    );
+    Menu.buildFromTemplate(items).popup({ window: win! });
+  });
+}
+
+// ── session persistence ──────────────────────────────────────────────────────
+
+let sessionSaveTimer: NodeJS.Timeout | null = null;
+
+function snapshotSession(): void {
+  const urls = tabs
+    .map((t) => t.view.webContents.getURL())
+    .filter((u) => /^https?:/.test(u));
+  const activeIndex = Math.max(
+    0,
+    tabs.filter((t) => /^https?:/.test(t.view.webContents.getURL()))
+      .findIndex((t) => t.id === activeTabId),
+  );
+  if (urls.length > 0) saveSession({ urls, activeIndex });
+  if (win && !win.isDestroyed() && !win.isFullScreen()) {
+    saveWindowBounds(win.getBounds());
+  }
+}
+
+function scheduleSessionSave(): void {
+  if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(snapshotSession, 1500);
+}
+
+// ── QoL actions ──────────────────────────────────────────────────────────────
+
+function goHome(): void {
+  activeTab()?.view.webContents.loadURL(homePage());
+}
+
+function toggleBookmark(): void {
+  const wc = activeTab()?.view.webContents;
+  if (!wc) return;
+  const url = wc.getURL();
+  if (!/^https?:/.test(url)) return;
+  if (isBookmarked(url)) removeBookmark(url);
+  else addBookmark(wc.getTitle() || url, url);
+  broadcastState();
+}
+
+function openFindBar(): void {
+  findBarVisible = true;
+  layoutTabs();
+  win?.webContents.send('kc:find-focus');
+}
+
+function zoom(dir: 'in' | 'out' | 'reset'): void {
+  const wc = activeTab()?.view.webContents;
+  if (!wc) return;
+  const cur = wc.getZoomFactor();
+  const next =
+    dir === 'reset'
+      ? 1
+      : dir === 'in'
+        ? Math.min(3, cur + 0.1)
+        : Math.max(0.3, cur - 0.1);
+  wc.setZoomFactor(next);
+}
+
+function selectTabByIndex(i: number): void {
+  if (tabs[i]) showTab(tabs[i].id);
+}
+
+function cycleTab(delta: number): void {
+  const idx = tabs.findIndex((t) => t.id === activeTabId);
+  if (idx === -1) return;
+  const next = (idx + delta + tabs.length) % tabs.length;
+  showTab(tabs[next].id);
 }
 
 function closeTab(id: number): void {
@@ -285,7 +581,7 @@ function closeTab(id: number): void {
   win?.contentView.removeChildView(tab.view);
   tab.view.webContents.close();
   if (tabs.length === 0) {
-    createTab(HOME_URL);
+    createTab(homePage());
   } else if (activeTabId === id) {
     showTab(tabs[Math.max(0, idx - 1)].id);
   } else {
@@ -312,13 +608,81 @@ function wireIpc(): void {
     activeTab()?.view.webContents.navigationHistory.goForward(),
   );
   ipcMain.on('kc:reload', () => activeTab()?.view.webContents.reload());
-  ipcMain.on('kc:new-tab', () => void createTab(HOME_URL));
+  ipcMain.on('kc:new-tab', () => void createTab(homePage()));
   ipcMain.on('kc:close-tab', (_e, id: number) => closeTab(id));
   ipcMain.on('kc:select-tab', (_e, id: number) => showTab(id));
   ipcMain.on('kc:open-probe', () => void createTab(probeUrl()));
   ipcMain.on('kc:toggle-popover', () => setPopoverOpen(!popoverOpen));
   ipcMain.on('kc:close-popover', () => setPopoverOpen(false));
   ipcMain.on('kc:open-settings', () => openSettingsWindow());
+  ipcMain.on('kc:home', () => goHome());
+
+  // bookmarks
+  ipcMain.on('kc:bookmark-toggle', () => toggleBookmark());
+  ipcMain.on('kc:bookmark-open', (_e, url: string) => {
+    const t = activeTab();
+    if (t) t.view.webContents.loadURL(url);
+  });
+  ipcMain.on('kc:bookmark-remove', (_e, url: string) => {
+    removeBookmark(url);
+    broadcastState();
+  });
+  ipcMain.on('kc:toggle-bookmarks-bar', () => {
+    setBookmarksBarVisible(!bookmarksBarVisible());
+    layoutTabs();
+    broadcastState();
+  });
+
+  // find in page
+  ipcMain.on('kc:find', (_e, text: string, forward = true) => {
+    if (text) activeTab()?.view.webContents.findInPage(text, { forward });
+  });
+  ipcMain.on('kc:find-close', () => {
+    activeTab()?.view.webContents.stopFindInPage('clearSelection');
+    findBarVisible = false;
+    layoutTabs();
+  });
+  ipcMain.on('kc:find-open', () => openFindBar());
+
+  // zoom
+  ipcMain.on('kc:zoom', (_e, dir: 'in' | 'out' | 'reset') => zoom(dir));
+
+  // url-bar suggestions from history (rendered in the topmost suggest view)
+  ipcMain.on('kc:suggest-query', (_e, query: string) => {
+    if (!query.trim()) {
+      hideSuggest();
+      return;
+    }
+    showSuggest(
+      searchHistory(query, 6).map((h) => ({ url: h.url, title: h.title })),
+    );
+  });
+  ipcMain.on('kc:suggest-close', () => hideSuggest());
+  ipcMain.on('kc:suggest-pick', (_e, url: string) => {
+    hideSuggest();
+    activeTab()?.view.webContents.loadURL(url);
+  });
+
+  // settings General
+  ipcMain.handle('kc:get-general', () => ({
+    homePage: homePage(),
+    bookmarksBarVisible: bookmarksBarVisible(),
+  }));
+  ipcMain.on('kc:set-home', (_e, url: string) => {
+    setHomePage(url.trim() || 'https://vimeo.com');
+    broadcastState();
+  });
+  ipcMain.handle('kc:clear-data', async (_e, opts: { history: boolean; cookies: boolean; cache: boolean }) => {
+    if (opts.history) clearHistory();
+    if (opts.cache) await session.defaultSession.clearCache();
+    if (opts.cookies) {
+      await session.defaultSession.clearStorageData({
+        storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage'],
+      });
+    }
+    broadcastState();
+    return { ok: true };
+  });
 
   const persistTabDefault = (tab: Tab) => {
     try {
@@ -580,9 +944,12 @@ function openSettingsWindow(): void {
 }
 
 function createWindow(): void {
+  const saved = windowBounds();
   win = new BrowserWindow({
-    width: 1440,
-    height: 940,
+    width: saved?.width ?? 1440,
+    height: saved?.height ?? 940,
+    x: saved?.x,
+    y: saved?.y,
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
@@ -595,8 +962,13 @@ function createWindow(): void {
   });
   win.loadFile(path.join(__dirname, '..', 'ui', 'chrome.html'));
   ensurePopoverView();
+  ensureSuggestView();
   activeDisplayId = curDisplay()?.id ?? -1;
-  win.on('resize', layoutTabs);
+  win.on('resize', () => {
+    layoutTabs();
+    scheduleSessionSave();
+  });
+  win.on('moved', scheduleSessionSave);
   // When the window crosses to another monitor, the measured correction for
   // that display takes over.
   const onMaybeDisplayChange = () => {
@@ -616,8 +988,79 @@ function createWindow(): void {
   });
 }
 
+function setupDownloads(): void {
+  session.defaultSession.on('will-download', (_e, item) => {
+    const name = item.getFilename();
+    win?.webContents.send('kc:download', { name, state: 'started' });
+    item.on('done', (_ev, state) => {
+      win?.webContents.send('kc:download', {
+        name,
+        state,
+        path: item.getSavePath(),
+      });
+      if (state === 'completed' && Notification.isSupported()) {
+        const n = new Notification({
+          title: 'Download complete',
+          body: name,
+        });
+        n.on('click', () => shell.showItemInFolder(item.getSavePath()));
+        n.show();
+      }
+    });
+  });
+}
+
+function installAppMenu(): void {
+  installMenu({
+    newTab: () => void createTab(homePage()),
+    closeTab: () => activeTabId !== -1 && closeTab(activeTabId),
+    reload: () => activeTab()?.view.webContents.reload(),
+    hardReload: () => activeTab()?.view.webContents.reloadIgnoringCache(),
+    back: () => activeTab()?.view.webContents.navigationHistory.goBack(),
+    forward: () => activeTab()?.view.webContents.navigationHistory.goForward(),
+    home: goHome,
+    focusUrlBar: () => win?.webContents.send('kc:focus-urlbar'),
+    find: openFindBar,
+    bookmarkToggle: toggleBookmark,
+    toggleBookmarksBar: () => {
+      setBookmarksBarVisible(!bookmarksBarVisible());
+      layoutTabs();
+      broadcastState();
+    },
+    zoomIn: () => zoom('in'),
+    zoomOut: () => zoom('out'),
+    zoomReset: () => zoom('reset'),
+    nextTab: () => cycleTab(1),
+    prevTab: () => cycleTab(-1),
+    selectTab: selectTabByIndex,
+    openSettings: openSettingsWindow,
+    openProbe: () => void createTab(probeUrl()),
+    print: () => activeTab()?.view.webContents.print(),
+    clearBrowsingData: () => {
+      openSettingsWindow();
+      settingsWin?.webContents.once('did-finish-load', () =>
+        settingsWin?.webContents.send('kc:scroll-to-data'),
+      );
+    },
+    toggleDevTools: () => activeTab()?.view.webContents.toggleDevTools(),
+  });
+}
+
+function restoreOrHome(): void {
+  const s = lastSession();
+  if (s && s.urls.length > 0) {
+    s.urls.forEach((u) => createTab(u, {}));
+    const target = tabs[s.activeIndex] ?? tabs[0];
+    if (target) showTab(target.id);
+  } else {
+    createTab(homePage());
+  }
+}
+
 app.whenReady().then(async () => {
   wireIpc();
+  setupDownloads();
+  installAppMenu();
   createWindow();
 
   if (process.argv.includes('--measure')) {
@@ -840,6 +1283,47 @@ app.whenReady().then(async () => {
       process.exitCode = 1;
     }
     app.quit();
+  } else if (process.argv.includes('--qol-check')) {
+    // Exercise the QoL surface headlessly: bookmark, find, suggestions,
+    // session snapshot, home. Dumps a JSON report.
+    const report: Record<string, unknown> = {};
+    const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const t = createTab('https://example.com/', {});
+      await new Promise<void>((r) =>
+        t.view.webContents.once('did-finish-load', () => r()),
+      );
+      await settle(500);
+      // bookmark toggle
+      toggleBookmark();
+      report.bookmarkedAfterAdd = isBookmarked('https://example.com/');
+      report.bookmarksCount = bookmarks().length;
+      // history recorded → suggestions
+      recordVisit('https://example.com/', 'Example Domain');
+      report.suggest = searchHistory('example', 5).map((h) => h.url);
+      // find in page
+      const found = await new Promise<{ matches: number } | null>((resolve) => {
+        t.view.webContents.once('found-in-page', (_e, r) => resolve({ matches: r.matches }));
+        t.view.webContents.findInPage('example');
+        setTimeout(() => resolve(null), 3000);
+      });
+      report.findMatches = found?.matches ?? 0;
+      t.view.webContents.stopFindInPage('clearSelection');
+      // session snapshot
+      snapshotSession();
+      report.savedSession = lastSession();
+      // home + zoom
+      report.homePage = homePage();
+      zoom('in');
+      report.zoomFactor = +t.view.webContents.getZoomFactor().toFixed(2);
+      // menu installed?
+      report.menuInstalled = Menu.getApplicationMenu() !== null;
+    } catch (err) {
+      report.error = String(err);
+      process.exitCode = 1;
+    }
+    console.log('KC_QOL ' + JSON.stringify(report, null, 2));
+    app.quit();
   } else if (process.argv.includes('--embed-check')) {
     // Prove the cross-origin iframe embed path: load a file:// page whose
     // <video> lives inside a youtube.com iframe, apply Simple, and confirm the
@@ -890,13 +1374,21 @@ app.whenReady().then(async () => {
         const b = win!.getContentBounds();
         console.log(
           'KC_VIDEO_RECT ' +
-            JSON.stringify({ x: b.x, y: b.y + TOOLBAR_H, w: 640, h: 360 }),
+            JSON.stringify({ x: b.x, y: b.y + chromeHeight(), w: 640, h: 360 }),
         );
       }, 2500);
     });
   } else {
-    createTab(HOME_URL);
+    restoreOrHome();
   }
 });
 
+app.on('activate', () => {
+  if (!win) {
+    createWindow();
+    win!.webContents.once('did-finish-load', restoreOrHome);
+  }
+});
+
+app.on('before-quit', snapshotSession);
 app.on('window-all-closed', () => app.quit());

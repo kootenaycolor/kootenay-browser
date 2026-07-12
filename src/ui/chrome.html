@@ -7,11 +7,9 @@
   html, body { height: 100%; overflow: hidden; }
 
   #chrome {
-    height: 84px;
     display: flex;
     flex-direction: column;
     background: var(--bg);
-    border-bottom: 1px solid var(--border);
   }
 
   /* ── tab strip ─────────────────────────────────────────── */
@@ -23,15 +21,16 @@
     gap: 4px;
     -webkit-app-region: drag;
   }
+  #tabs { display: flex; gap: 4px; align-items: flex-end; overflow: hidden; }
   .tab {
     -webkit-app-region: no-drag;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     height: 30px;
     max-width: 200px;
     min-width: 90px;
-    padding: 0 10px 0 12px;
+    padding: 0 8px 0 11px;
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     color: var(--text-secondary);
     background: transparent;
@@ -40,6 +39,13 @@
     overflow: hidden;
   }
   .tab.active { background: var(--bg-inset); color: var(--text); }
+  .tab .favicon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
+  .tab .spinner {
+    width: 12px; height: 12px; flex: none;
+    border: 2px solid var(--border-strong); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .tab .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab .close {
     width: 16px; height: 16px; border-radius: 4px; border: none;
@@ -47,10 +53,7 @@
     font-size: 12px; line-height: 1; cursor: pointer; padding: 0;
   }
   .tab .close:hover { background: var(--border); color: var(--text); }
-  .tab .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--accent); flex: none; display: none;
-  }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; display: none; }
   .tab.managed .dot { display: block; }
   #newtab {
     -webkit-app-region: no-drag;
@@ -66,18 +69,19 @@
     height: 46px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 0 12px;
     background: var(--bg-inset);
   }
   .navbtn {
     width: 30px; height: 30px; border: none; border-radius: var(--radius-sm);
     background: transparent; color: var(--text-secondary);
-    font-size: 15px; cursor: pointer;
+    font-size: 15px; cursor: pointer; flex: none;
   }
   .navbtn:hover:not(:disabled) { background: var(--bg-raised); color: var(--text); }
   .navbtn:disabled { opacity: 0.35; }
 
+  #urlwrap { flex: 1; position: relative; display: flex; align-items: center; }
   #urlbar {
     flex: 1;
     height: 32px;
@@ -85,18 +89,25 @@
     border-radius: var(--radius);
     background: var(--bg-raised);
     color: var(--text);
-    padding: 0 14px;
+    padding: 0 38px 0 14px;
     font-family: var(--font);
     font-size: 13px;
     outline: none;
     user-select: text;
   }
   #urlbar:focus { border-color: var(--border-strong); }
+  #star {
+    position: absolute; right: 8px;
+    width: 24px; height: 24px; border: none; border-radius: 6px;
+    background: transparent; color: var(--text-secondary);
+    font-size: 15px; cursor: pointer;
+  }
+  #star:hover { background: var(--bg-inset); }
+  #star.on { color: var(--accent); }
 
-  /* pipeline button + badge */
   #pipebtn {
     display: flex; align-items: center; gap: 7px;
-    height: 32px; padding: 0 12px;
+    height: 32px; padding: 0 12px; flex: none;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--bg-raised);
@@ -106,24 +117,82 @@
   }
   #pipebtn:hover { border-color: var(--border-strong); color: var(--text); }
   #pipebtn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-  #pipebtn .swatch { font-size: 13px; }
 
+  /* ── bookmarks bar ─────────────────────────────────────── */
+  #bookmarksbar {
+    height: 32px;
+    display: none;
+    align-items: center;
+    gap: 2px;
+    padding: 0 10px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+  }
+  #bookmarksbar.show { display: flex; }
+  .bm {
+    display: flex; align-items: center; gap: 6px;
+    height: 24px; padding: 0 9px; border-radius: 6px;
+    color: var(--text-secondary); font-size: 12px; cursor: default;
+    white-space: nowrap; max-width: 180px; overflow: hidden;
+  }
+  .bm:hover { background: var(--bg-inset); color: var(--text); }
+  .bm .favicon { width: 13px; height: 13px; flex: none; }
+  .bm .t { overflow: hidden; text-overflow: ellipsis; }
+  #bm-empty { color: var(--text-secondary); font-size: 11.5px; opacity: 0.6; padding-left: 4px; }
+
+  /* ── find bar ──────────────────────────────────────────── */
+  #findbar {
+    height: 38px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    background: var(--bg-raised);
+    border-top: 1px solid var(--border);
+  }
+  #findbar.show { display: flex; }
+  #findinput {
+    width: 260px; height: 28px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-inset); color: var(--text);
+    padding: 0 10px; font-size: 12.5px; outline: none; user-select: text;
+  }
+  #findcount { font-size: 12px; color: var(--text-secondary); min-width: 60px; }
+  .findbtn {
+    width: 28px; height: 28px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-inset);
+    color: var(--text-secondary); cursor: pointer; font-size: 13px;
+  }
+  .findbtn:hover { color: var(--text); border-color: var(--border-strong); }
 </style>
 </head>
 <body>
   <div id="chrome">
     <div id="tabstrip">
-      <div id="tabs" style="display:flex;gap:4px;align-items:flex-end;"></div>
-      <button id="newtab" title="New tab">+</button>
+      <div id="tabs"></div>
+      <button id="newtab" title="New tab (⌘T)">+</button>
     </div>
     <div id="toolbar">
-      <button class="navbtn" id="back" title="Back">‹</button>
-      <button class="navbtn" id="forward" title="Forward">›</button>
-      <button class="navbtn" id="reload" title="Reload">⟳</button>
-      <input id="urlbar" spellcheck="false" placeholder="Enter URL — or 'probe' for the calibration page">
+      <button class="navbtn" id="back" title="Back (⌘[)">‹</button>
+      <button class="navbtn" id="forward" title="Forward (⌘])">›</button>
+      <button class="navbtn" id="reload" title="Reload (⌘R)">⟳</button>
+      <button class="navbtn" id="home" title="Home (⌘⇧H)">⌂</button>
+      <div id="urlwrap">
+        <input id="urlbar" spellcheck="false" placeholder="Search or enter address — or 'probe' for the calibration page">
+        <button id="star" title="Bookmark (⌘D)">☆</button>
+      </div>
       <button id="pipebtn" title="Color pipeline">
         <span class="swatch">◇</span><span id="pipelabel">Color: Off</span>
       </button>
+    </div>
+    <div id="bookmarksbar"></div>
+    <div id="findbar">
+      <input id="findinput" spellcheck="false" placeholder="Find in page">
+      <span id="findcount"></span>
+      <button class="findbtn" id="findprev" title="Previous">↑</button>
+      <button class="findbtn" id="findnext" title="Next">↓</button>
+      <button class="findbtn" id="findclose" title="Close (Esc)">✕</button>
     </div>
   </div>
 

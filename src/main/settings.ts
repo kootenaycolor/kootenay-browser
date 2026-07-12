@@ -22,6 +22,24 @@ export interface DomainDefault {
   source: TransferId;
 }
 
+export interface Bookmark {
+  title: string;
+  url: string;
+  addedAt: string;
+}
+
+export interface SavedSession {
+  urls: string[];
+  activeIndex: number;
+}
+
+export interface SavedBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface DisplayEntry {
   activeId: string | null;
   profiles: PipelineProfile[];
@@ -31,6 +49,11 @@ interface StoreShape {
   domainDefaults: Record<string, DomainDefault>;
   simpleTarget: TransferId;
   displays: Record<string, DisplayEntry>;
+  homePage: string;
+  bookmarks: Bookmark[];
+  bookmarksBarVisible: boolean;
+  lastSession?: SavedSession;
+  windowBounds?: SavedBounds;
 }
 
 function storePath(): string {
@@ -49,14 +72,13 @@ let cache: StoreShape | null = null;
 
 function store(): StoreShape {
   if (!cache) {
-    cache = readJson<StoreShape>(storePath()) ?? {
-      domainDefaults: {},
-      simpleTarget: 'gamma22',
-      displays: {},
-    };
+    cache = readJson<StoreShape>(storePath()) ?? ({} as StoreShape);
     cache.domainDefaults ??= {};
     cache.simpleTarget ??= 'gamma22';
     cache.displays ??= {};
+    cache.homePage ??= 'https://vimeo.com';
+    cache.bookmarks ??= [];
+    cache.bookmarksBarVisible ??= true;
   }
   return cache;
 }
@@ -90,6 +112,63 @@ export function simpleTarget(): TransferId {
 export function setSimpleTarget(target: TransferId): void {
   store().simpleTarget = target;
   persist();
+}
+
+// ── browsing quality-of-life ────────────────────────────────────────────────
+
+export function homePage(): string {
+  return store().homePage;
+}
+
+export function setHomePage(url: string): void {
+  store().homePage = url;
+  persist();
+}
+
+export function bookmarks(): Bookmark[] {
+  return store().bookmarks;
+}
+
+export function isBookmarked(url: string): boolean {
+  return store().bookmarks.some((b) => b.url === url);
+}
+
+export function addBookmark(title: string, url: string): void {
+  if (isBookmarked(url)) return;
+  store().bookmarks.push({ title, url, addedAt: new Date().toISOString() });
+  persist();
+}
+
+export function removeBookmark(url: string): void {
+  store().bookmarks = store().bookmarks.filter((b) => b.url !== url);
+  persist();
+}
+
+export function bookmarksBarVisible(): boolean {
+  return store().bookmarksBarVisible;
+}
+
+export function setBookmarksBarVisible(v: boolean): void {
+  store().bookmarksBarVisible = v;
+  persist();
+}
+
+export function saveSession(session: SavedSession): void {
+  store().lastSession = session;
+  persist();
+}
+
+export function lastSession(): SavedSession | undefined {
+  return store().lastSession;
+}
+
+export function saveWindowBounds(bounds: SavedBounds): void {
+  store().windowBounds = bounds;
+  persist();
+}
+
+export function windowBounds(): SavedBounds | undefined {
+  return store().windowBounds;
 }
 
 // ── per-display measured profiles ───────────────────────────────────────────

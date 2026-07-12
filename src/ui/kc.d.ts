@@ -9,10 +9,18 @@ interface KcTabState {
   id: number;
   title: string;
   url: string;
+  favicon?: string;
   method: KcMethod;
   source: string;
+  loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+}
+
+interface KcBookmark {
+  title: string;
+  url: string;
+  addedAt: string;
 }
 
 interface KcActiveProfile {
@@ -28,6 +36,9 @@ interface KcState {
   simpleTarget: string;
   display: { id: number; label: string } | null;
   activeProfile: KcActiveProfile | null;
+  bookmarks: KcBookmark[];
+  bookmarksBarVisible: boolean;
+  currentBookmarked: boolean;
 }
 
 interface KcProfile {

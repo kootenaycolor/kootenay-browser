@@ -57,6 +57,17 @@ python3 scripts/make_patches.py       # regenerate the BT.709 probe video
 python3 scripts/make_step_patches.py  # regenerate the probe step video
 ```
 
+## Browser features
+
+Tabs (favicons, loading spinners, middle-click close, ⌘1–9), full app menu with
+standard shortcuts (⌘T/W/R/L/F/D, ⌘±, ⌘[ ]), **session + window restore**,
+**bookmarks** (⌘D star + bookmarks bar, ⌘⇧B), **history-backed URL suggestions**,
+**find in page** (⌘F), right-click **context menus** (open/copy link, save image,
+search selection, inspect), **downloads** with completion notifications, a **home
+page** setting, styled **error pages**, HTML-fullscreen video, and **Clear
+Browsing Data** (history / cookies+storage / cache) in Settings. Cookies and
+localStorage persist across launches (Electron disk session).
+
 ## Known limitations
 
 - No Widevine: DRM content (Netflix etc.) won't play. Vimeo/YouTube/Frame.io

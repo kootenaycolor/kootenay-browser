@@ -297,5 +297,28 @@ function button(label: string, className = ''): HTMLButtonElement {
 simpleTargetSel.onchange = () =>
   kc.send('kc:set-simple-target', simpleTargetSel.value);
 
+// ── General section ──────────────────────────────────────────────────────────
+const homeInput = $<HTMLInputElement>('homePage');
+kc.invoke('kc:get-general').then((g) => {
+  const gen = g as { homePage: string };
+  homeInput.value = gen.homePage;
+});
+homeInput.onchange = () => kc.send('kc:set-home', homeInput.value);
+
+$('clearBtn').onclick = async () => {
+  const res = $('clr-result');
+  res.textContent = 'Clearing…';
+  const out = (await kc.invoke('kc:clear-data', {
+    history: ($<HTMLInputElement>('clr-history')).checked,
+    cookies: ($<HTMLInputElement>('clr-cookies')).checked,
+    cache: ($<HTMLInputElement>('clr-cache')).checked,
+  })) as { ok: boolean };
+  res.textContent = out.ok ? '✓ Cleared.' : 'Failed.';
+};
+
+kc.on('kc:scroll-to-data', () => {
+  document.querySelector('#clearBtn')?.scrollIntoView({ behavior: 'smooth' });
+});
+
 kc.on('kc:settings-state', (s) => render(s as KcSettingsState));
 })();

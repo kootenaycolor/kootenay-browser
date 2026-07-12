@@ -63,8 +63,28 @@
 </style>
 </head>
 <body>
-  <header>Color Settings</header>
+  <header>Settings</header>
   <main>
+    <section>
+      <h2>General</h2>
+      <div class="card">
+        <div class="row">
+          <span>Home page</span>
+          <input id="homePage" type="text" style="width:260px" placeholder="https://…">
+        </div>
+        <div class="row" style="margin-top:12px">
+          <span>Clear browsing data</span>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label class="hint"><input type="checkbox" id="clr-history" checked> History</label>
+            <label class="hint"><input type="checkbox" id="clr-cookies"> Cookies &amp; storage</label>
+            <label class="hint"><input type="checkbox" id="clr-cache" checked> Cache</label>
+            <button id="clearBtn">Clear</button>
+          </div>
+        </div>
+        <div class="result" id="clr-result"></div>
+      </div>
+    </section>
+
     <section>
       <h2>Simple mode target</h2>
       <div class="card row">
