@@ -18,6 +18,7 @@ export interface MenuActions {
   find(): void;
   bookmarkToggle(): void;
   toggleBookmarksBar(): void;
+  openInternal(page: string): void;
   zoomIn(): void;
   zoomOut(): void;
   zoomReset(): void;
@@ -124,6 +125,12 @@ export function installMenu(a: MenuActions): void {
         { label: 'Back', accelerator: 'Cmd+[', click: a.back },
         { label: 'Forward', accelerator: 'Cmd+]', click: a.forward },
         { label: 'Home', accelerator: 'Cmd+Shift+H', click: a.home },
+        { type: 'separator' },
+        {
+          label: 'Show All History',
+          accelerator: 'Cmd+Y',
+          click: () => a.openInternal('history'),
+        },
       ],
     },
     {
@@ -138,6 +145,17 @@ export function installMenu(a: MenuActions): void {
           label: 'Toggle Bookmarks Bar',
           accelerator: 'Cmd+Shift+B',
           click: a.toggleBookmarksBar,
+        },
+        { type: 'separator' },
+        {
+          label: 'Show All Bookmarks',
+          accelerator: 'Cmd+Alt+B',
+          click: () => a.openInternal('bookmarks'),
+        },
+        {
+          label: 'Downloads',
+          accelerator: 'Cmd+Shift+J',
+          click: () => a.openInternal('downloads'),
         },
       ],
     },

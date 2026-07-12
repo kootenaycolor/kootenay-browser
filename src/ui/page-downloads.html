@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Downloads</title>
+<link rel="stylesheet" href="page.css">
+<style>
+  .dl-name { font-size: 13px; color: var(--text); }
+  .dl-sub { font-size: 11.5px; color: var(--text-secondary); }
+  .dl-state { font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    background: var(--bg-inset); color: var(--text-secondary); }
+  .dl-state.completed { color: var(--accent); }
+  .bar { height: 4px; border-radius: 2px; background: var(--bg-inset); margin-top: 5px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="page-head"><h1>Downloads</h1></div>
+    <div id="list"></div>
+    <div class="empty" id="empty" style="display:none">No downloads yet.</div>
+  </div>
+  <script src="page-downloads.js"></script>
+</body>
+</html>

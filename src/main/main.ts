@@ -191,6 +191,15 @@ function pushAllLuts(): void {
   for (const t of tabs) pushLut(t);
 }
 
+/** Tell any open internal (kootenay://) pages to re-fetch their data. */
+function refreshInternalPages(): void {
+  for (const t of tabs) {
+    if (t.view.webContents.getURL().startsWith('kootenay:')) {
+      t.view.webContents.send('kc:internal-refresh');
+    }
+  }
+}
+
 function activeTab(): Tab | undefined {
   return tabs.find((t) => t.id === activeTabId);
 }
@@ -601,6 +610,7 @@ function toggleBookmark(): void {
   if (!/^https?:/.test(url)) return;
   if (isBookmarked(url)) removeBookmark(url);
   else addBookmark(wc.getTitle() || url, url);
+  refreshInternalPages();
   broadcastState();
 }
 
@@ -778,10 +788,12 @@ function wireIpc(): void {
   });
   ipcMain.on('kc:internal-clear-history', () => {
     clearHistory();
+    refreshInternalPages();
     broadcastState();
   });
   ipcMain.on('kc:internal-remove-bookmark', (_e, url: string) => {
     removeBookmark(url);
+    refreshInternalPages();
     broadcastState();
   });
   ipcMain.on('kc:internal-reveal-download', (_e, p: string) => {
@@ -1142,7 +1154,10 @@ function setupDownloads(): void {
     };
     downloads.unshift(rec);
     if (downloads.length > 100) downloads.pop();
-    const notifyChrome = () => win?.webContents.send('kc:download', rec);
+    const notifyChrome = () => {
+      win?.webContents.send('kc:download', rec);
+      refreshInternalPages();
+    };
     notifyChrome();
     item.on('updated', () => {
       rec.received = item.getReceivedBytes();
@@ -1180,6 +1195,7 @@ function installAppMenu(): void {
       layoutTabs();
       broadcastState();
     },
+    openInternal: (page: string) => void createTab(`kootenay://${page}`),
     zoomIn: () => zoom('in'),
     zoomOut: () => zoom('out'),
     zoomReset: () => zoom('reset'),
@@ -1462,6 +1478,33 @@ app.whenReady().then(async () => {
       process.exitCode = 1;
     }
     console.log('KC_NEWTAB ' + JSON.stringify(report, null, 2));
+    app.quit();
+  } else if (process.argv.includes('--pages-check')) {
+    const report: Record<string, unknown> = {};
+    try {
+      recordVisit('https://vimeo.com/', 'Vimeo');
+      recordVisit('https://frame.io/', 'Frame.io');
+      addBookmark('Vimeo', 'https://vimeo.com/');
+      for (const page of ['history', 'bookmarks', 'downloads']) {
+        const t = createTab(`kootenay://${page}`, {});
+        await new Promise<void>((r) =>
+          t.view.webContents.once('did-finish-load', () => r()),
+        );
+        await new Promise((r) => setTimeout(r, 700));
+        report[page] = await t.view.webContents.executeJavaScript(
+          `({ title: document.title,
+              rows: document.querySelectorAll('.row').length,
+              empty: getComputedStyle(document.getElementById('empty')||document.body).display,
+              kcInternal: typeof kcInternal }) `,
+        );
+        closeTab(t.id);
+      }
+      removeBookmark('https://vimeo.com/');
+    } catch (err) {
+      report.error = String(err);
+      process.exitCode = 1;
+    }
+    console.log('KC_PAGES ' + JSON.stringify(report, null, 2));
     app.quit();
   } else if (process.argv.includes('--qol-check')) {
     // Exercise the QoL surface headlessly: bookmark, find, suggestions,
