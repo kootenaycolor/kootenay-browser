@@ -791,6 +791,55 @@ app.whenReady().then(async () => {
       process.exitCode = 1;
     }
     app.quit();
+  } else if (process.argv.includes('--wizard-check')) {
+    // Drive the settings-window probe wizard end-to-end (sim probe): expand,
+    // detect, start, wait for completion, dump the wizard's result text.
+    try {
+      openSettingsWindow();
+      await new Promise<void>((r) =>
+        settingsWin!.webContents.once('did-finish-load', () => r()),
+      );
+      await new Promise((r) => setTimeout(r, 600));
+      const clicked = await settingsWin!.webContents.executeJavaScript(
+        `(() => {
+           const btns = [...document.querySelectorAll('button')];
+           const hw = btns.find(b => b.textContent.includes('hardware probe'));
+           if (!hw) return 'no-hw-button';
+           hw.click();
+           return 'opened';
+         })()`,
+      );
+      console.log('KC_WIZ open:', clicked);
+      await new Promise((r) => setTimeout(r, 2500)); // detect settles
+      const status = await settingsWin!.webContents.executeJavaScript(
+        `document.querySelector('.probe-status')?.textContent`,
+      );
+      console.log('KC_WIZ status:', status);
+      await settingsWin!.webContents.executeJavaScript(
+        `(() => {
+           // sim probe is scripted one-sample-per-patch — set avg to 1
+           const avg = document.querySelector('.import.open input[type=number]');
+           if (avg) avg.value = '1';
+           const s = document.querySelector('button.probe-start');
+           s.disabled = false; s.click();
+         })()`,
+      );
+      // sim run: 15 reads at 50ms settle... but wizard uses default settle
+      // (1s) — poll for the result text.
+      let resultText = '';
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        resultText = await settingsWin!.webContents.executeJavaScript(
+          `[...document.querySelectorAll('.result')].map(e => e.textContent).join('\\n')`,
+        );
+        if (resultText.includes('✓ Saved') || resultText.includes('❌')) break;
+      }
+      console.log('KC_WIZ result:\n' + resultText);
+    } catch (err) {
+      console.error('KC_WIZ FAILED', err);
+      process.exitCode = 1;
+    }
+    app.quit();
   } else if (process.argv.includes('--embed-check')) {
     // Prove the cross-origin iframe embed path: load a file:// page whose
     // <video> lives inside a youtube.com iframe, apply Simple, and confirm the

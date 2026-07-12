@@ -26,6 +26,10 @@ function render(s: KcSettingsState): void {
   }
   simpleTargetSel.value = s.simpleTarget;
 
+  // Don't rebuild the cards while a wizard/import panel is open — a state
+  // broadcast mid-measurement would replace the DOM and wipe live progress.
+  if (displaysEl.querySelector('.import.open')) return;
+
   displaysEl.textContent = '';
   for (const d of s.displays) {
     displaysEl.appendChild(renderDisplay(d, s));
