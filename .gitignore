@@ -7,3 +7,20 @@ build/icon-1024.png
 
 out/
 build/dmg-stage/
+build/
+.build/
+*.dmg
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+credentials.json
+token.json
+*.key
+scratch/
+
+# icon is source, not build output
+!build/icon.icns

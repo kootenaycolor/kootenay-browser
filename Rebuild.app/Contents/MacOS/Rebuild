@@ -1,0 +1,32 @@
+#!/bin/bash
+# Double-click to rebuild Kootenay Browser and install it to /Applications.
+# Finder gives .app executables a bare environment — set PATH explicitly.
+set -u
+
+PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+NAME="Kootenay Browser"
+LOG="/tmp/kootenaybrowser_build.log"
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+for d in "$HOME"/.nvm/versions/node/*/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+
+notify() { /usr/bin/osascript -e "display notification \"$1\" with title \"$NAME\""; }
+alert()  { /usr/bin/osascript -e "display dialog \"$1\" buttons {\"OK\"} default button \"OK\" with icon stop with title \"$NAME Build\""; }
+
+cd "$PROJECT_DIR" || { alert "Cannot find project folder."; exit 1; }
+
+command -v npm >/dev/null || { alert "npm not found. Is Node installed?"; exit 1; }
+
+: > "$LOG"
+[ -d node_modules ] || { notify "Installing dependencies…"; npm install >> "$LOG" 2>&1; }
+
+notify "Building $NAME…"
+if npm run install-app >> "$LOG" 2>&1; then
+  notify "Done — installed to Applications."
+else
+  TAIL=$(tail -25 "$LOG" | sed 's/"/\\"/g')
+  alert "Build failed. Last output:\n\n${TAIL}\n\nFull log: $LOG"
+  exit 1
+fi
